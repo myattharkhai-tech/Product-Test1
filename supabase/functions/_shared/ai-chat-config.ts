@@ -110,10 +110,12 @@ export async function sendChatMessage(
     });
 
     if (!res.ok) {
+      let body = "";
+      try { body = await res.text(); } catch { /* ignore */ }
       console.error(
-        `AI provider error: status=${res.status} model=${config.AI_MODEL_ID}`,
+        `AI provider error: status=${res.status} model=${config.AI_MODEL_ID} body=${sanitizeForLog(body)}`,
       );
-      throwProviderError(res.status);
+      throwProviderError(res.status, body);
     }
 
     const data = await res.json();
@@ -184,10 +186,12 @@ export async function* streamChatMessage(
     });
 
     if (!res.ok) {
+      let body = "";
+      try { body = await res.text(); } catch { /* ignore */ }
       console.error(
-        `AI provider stream error: status=${res.status} model=${config.AI_MODEL_ID}`,
+        `AI provider stream error: status=${res.status} model=${config.AI_MODEL_ID} body=${sanitizeForLog(body)}`,
       );
-      throwProviderError(res.status);
+      throwProviderError(res.status, body);
     }
 
     const reader = res.body?.getReader();
@@ -266,11 +270,19 @@ export function sanitizeForLog(input: string): string {
   return input.replace(/[\n\r\t]/g, " ").slice(0, 100);
 }
 
-export function throwProviderError(status: number): never {
-  if (status === 400) throw new Error("Gemini rejected the request. Check GEMINI_API_KEY and GEMINI_MODEL.");
-  if (status === 401) throw new Error("Gemini authentication failed. Replace GEMINI_API_KEY in backend secrets.");
-  if (status === 403) throw new Error("Gemini access denied. Check key restrictions, project permissions and model access.");
-  if (status === 404) throw new Error("Gemini model unavailable. Check GEMINI_MODEL.");
-  if (status === 429) throw new Error("Gemini quota exceeded. Check AI Studio usage and retry later.");
-  throw new Error("Gemini is unavailable (HTTP " + status + "). Please retry later.");
+export function throwProviderError(status: number, body?: string): never {
+  let detail = "";
+  if (body) {
+    try {
+      const parsed = JSON.parse(body);
+      detail = parsed?.error?.message ?? parsed?.message ?? "";
+    } catch { detail = body.slice(0, 200); }
+  }
+  if (status === 400) throw new Error(`Gemini rejected the request${detail ? ": " + detail : ""}. Check GEMINI_API_KEY and GEMINI_MODEL.`);
+  if (status === 401) throw new Error(`Gemini authentication failed${detail ? ": " + detail : ""}. Replace GEMINI_API_KEY in backend secrets.`);
+  if (status === 403) throw new Error(`Gemini access denied${detail ? ": " + detail : ""}. Check key restrictions, project permissions and model access.`);
+  if (status === 404) throw new Error(`Gemini model unavailable${detail ? ": " + detail : ""}. Check GEMINI_MODEL.`);
+  if (status === 429) throw new Error(`Gemini quota exceeded${detail ? ": " + detail : ""}. Check AI Studio usage and retry later.`);
+  if (status === 503) throw new Error(`Gemini service is temporarily unavailable${detail ? ": " + detail : ""}. The model may be overloaded or the key may not have access. Please retry later.`);
+  throw new Error(`Gemini is unavailable (HTTP ${status})${detail ? ": " + detail : ""}. Please retry later.`);
 }

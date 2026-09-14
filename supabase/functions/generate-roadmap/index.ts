@@ -1,3 +1,4 @@
+// Generate-roadmap edge function — creates a 7-day study plan via Google Gemini.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { loadAIConfig, throwProviderError, checkRateLimit, sanitizeForLog } from "../_shared/ai-chat-config.ts";
 
@@ -85,8 +86,10 @@ Rules:
     });
 
     if (!res.ok) {
-      console.error(`AI provider error: status=${res.status} model=${config.AI_MODEL_ID}`);
-      throwProviderError(res.status);
+      let body = "";
+      try { body = await res.text(); } catch { /* ignore */ }
+      console.error(`AI provider error: status=${res.status} model=${config.AI_MODEL_ID} body=${sanitizeForLog(body)}`);
+      throwProviderError(res.status, body);
     }
 
     const data = await res.json();
