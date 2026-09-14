@@ -1,3 +1,5 @@
+// Chat edge function — streams AI responses via Server-Sent Events.
+// Uses Ollama Cloud via server-side secrets (AI_API_ENDPOINT, AI_API_KEY, AI_MODEL_ID).
 import {
   loadAIConfig,
   streamChatMessage,

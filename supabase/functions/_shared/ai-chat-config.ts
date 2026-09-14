@@ -126,6 +126,9 @@ export async function sendChatMessage(
     if (err instanceof Error && err.name === "AbortError") {
       throw new Error("The assistant took too long to respond — please try again.");
     }
+    if (err instanceof TypeError) {
+      throw new Error("The assistant connection failed. Please try again later.");
+    }
     throw err;
   } finally {
     clearTimeout(timeoutId);
@@ -194,6 +197,7 @@ export async function* streamChatMessage(
 
     const decoder = new TextDecoder();
     let buffer = "";
+    let yieldedText = false;
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -205,19 +209,22 @@ export async function* streamChatMessage(
           if (!line.startsWith("data:")) continue;
           const payload = line.slice(5).trim();
           if (!payload) continue;
-          if (payload === "[DONE]") return;
+          if (payload === "[DONE]") {
+            if (!yieldedText) throw new Error("The assistant returned an empty response. Please try again.");
+            return;
+          }
           let parsed;
           try { parsed = JSON.parse(payload); }
           catch { throw new Error("Gemini returned an invalid response."); }
           if (parsed.error) throw new Error("Gemini could not complete the reply. Check model access and quota.");
           const choice = parsed.choices?.[0];
           const text = choice?.delta?.content;
-          if (typeof text === "string" && text) yield text;
+          if (typeof text === "string" && text) { yieldedText = true; yield text; }
           if (choice?.finish_reason && choice.finish_reason !== "stop") {
             throw new Error("Gemini stopped the reply early (" + choice.finish_reason + "). Please try a shorter request.");
           }
         }
-        if (done) throw new Error("The AI provider disconnected before completing the reply.");
+        if (done) throw new Error(yieldedText ? "The assistant connection was interrupted before the reply completed. Please try again." : "The assistant returned an empty response. Please try again.");
       }
     } finally {
       await reader.cancel().catch(() => {});
@@ -226,6 +233,9 @@ export async function* streamChatMessage(
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       throw new Error("The assistant took too long to respond — please try again.");
+    }
+    if (err instanceof TypeError) {
+      throw new Error("The assistant connection failed. Please try again later.");
     }
     throw err;
   } finally {

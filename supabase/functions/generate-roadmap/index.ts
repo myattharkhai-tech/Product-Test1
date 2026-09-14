@@ -99,6 +99,9 @@ Rules:
     if (err instanceof Error && err.name === "AbortError") {
       throw new Error("The request timed out — please try again.");
     }
+    if (err instanceof TypeError) {
+      throw new Error("The assistant connection failed. Please try again later.");
+    }
     throw err;
   } finally {
     clearTimeout(timeoutId);
