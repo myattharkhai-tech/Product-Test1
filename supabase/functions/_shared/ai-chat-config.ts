@@ -72,6 +72,14 @@ interface OllamaMessage {
   content: string;
 }
 
+function providerError(status: number, action: string): Error {
+  if (status === 401) return new Error("Ollama Cloud credentials are invalid or expired. Replace AI_API_KEY in the backend secrets.");
+  if (status === 403) return new Error("Ollama Cloud denied access to this account or model. Check account and model access.");
+  if (status === 404) return new Error("The Ollama Cloud model or endpoint is unavailable. Check AI_MODEL_ID and AI_API_ENDPOINT.");
+  if (status === 429) return new Error("Ollama Cloud usage limit reached. Please retry later.");
+  return new Error(`Ollama Cloud could not ${action}. Please try again later.`);
+}
+
 // ── Adapter: single thin function that performs the AI API call ──────
 // Returns the full text response. For streaming, use streamChatMessage.
 export async function sendChatMessage(
@@ -127,12 +135,7 @@ export async function sendChatMessage(
       console.error(
         `AI provider error: status=${res.status} model=${config.AI_MODEL_ID}`,
       );
-      if (res.status === 401 || res.status === 403) throw new Error("Ollama Cloud rejected access. Check AI_API_KEY and model access.");
-      if (res.status === 404) throw new Error("Ollama Cloud model or endpoint not found. Check AI_MODEL_ID and AI_API_ENDPOINT.");
-      if (res.status === 429) {
-        throw new Error("The assistant is busy right now — please try again in a moment.");
-      }
-      throw new Error("Having trouble reaching the assistant — try again in a moment.");
+      throw providerError(res.status, "complete the reply");
     }
 
     const data = await res.json();
@@ -144,6 +147,9 @@ export async function sendChatMessage(
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       throw new Error("The assistant took too long to respond — please try again.");
+    }
+    if (err instanceof TypeError) {
+      throw new Error("The assistant connection failed. Please check your connection and try again.");
     }
     throw err;
   } finally {
@@ -206,12 +212,7 @@ export async function* streamChatMessage(
       console.error(
         `AI provider stream error: status=${res.status} model=${config.AI_MODEL_ID}`,
       );
-      if (res.status === 401 || res.status === 403) throw new Error("Ollama Cloud rejected access. Check AI_API_KEY and model access.");
-      if (res.status === 404) throw new Error("Ollama Cloud model or endpoint not found. Check AI_MODEL_ID and AI_API_ENDPOINT.");
-      if (res.status === 429) {
-        throw new Error("The assistant is busy right now — please try again in a moment.");
-      }
-      throw new Error("Having trouble reaching the assistant — try again in a moment.");
+      throw providerError(res.status, "stream the reply");
     }
 
     const reader = res.body?.getReader();
@@ -221,6 +222,8 @@ export async function* streamChatMessage(
 
     const decoder = new TextDecoder();
     let buffer = "";
+    let yieldedText = false;
+    let completed = false;
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -234,10 +237,20 @@ export async function* streamChatMessage(
           try { parsed = JSON.parse(line); }
           catch { throw new Error("The AI provider returned an invalid response."); }
           if (parsed.error) throw new Error("The AI provider could not complete the reply. Check the model and account limits.");
-          if (typeof parsed.message?.content === "string" && parsed.message.content) yield parsed.message.content;
-          if (parsed.done) return;
+          if (typeof parsed.message?.content === "string" && parsed.message.content) {
+            yieldedText = true;
+            yield parsed.message.content;
+          }
+          if (parsed.done) {
+            completed = true;
+            return;
+          }
         }
-        if (done) throw new Error("The AI provider disconnected before completing the reply.");
+        if (done) {
+          throw new Error(yieldedText
+            ? "The assistant connection was interrupted before the reply completed. Please try again."
+            : "The assistant returned an empty response. Please try again.");
+        }
       }
     } finally {
       await reader.cancel().catch(() => {});
@@ -246,6 +259,9 @@ export async function* streamChatMessage(
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       throw new Error("The assistant took too long to respond — please try again.");
+    }
+    if (err instanceof TypeError) {
+      throw new Error("The assistant connection failed. Please check your connection and try again.");
     }
     throw err;
   } finally {

@@ -1,6 +1,14 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { loadAIConfig, checkRateLimit, sanitizeForLog } from "../_shared/ai-chat-config.ts";
 
+function providerError(status: number): Error {
+  if (status === 401) return new Error("Ollama Cloud credentials are invalid or expired. Replace AI_API_KEY in the backend secrets.");
+  if (status === 403) return new Error("Ollama Cloud denied access to this account or model. Check account and model access.");
+  if (status === 404) return new Error("The Ollama Cloud model or endpoint is unavailable. Check AI_MODEL_ID and AI_API_ENDPOINT.");
+  if (status === 429) return new Error("Ollama Cloud usage limit reached. Please retry later.");
+  return new Error("Having trouble generating your roadmap — try again in a moment.");
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -89,12 +97,7 @@ Rules:
 
     if (!res.ok) {
       console.error(`AI provider error: status=${res.status} model=${config.AI_MODEL_ID}`);
-      if (res.status === 401 || res.status === 403) throw new Error("Ollama Cloud rejected access. Check AI_API_KEY and model access.");
-      if (res.status === 404) throw new Error("Ollama Cloud model or endpoint not found. Check AI_MODEL_ID and AI_API_ENDPOINT.");
-      if (res.status === 429) {
-        throw new Error("The assistant is busy right now — please try again in a moment.");
-      }
-      throw new Error("Having trouble generating your roadmap — try again in a moment.");
+      throw providerError(res.status);
     }
 
     const data = await res.json();
@@ -106,6 +109,9 @@ Rules:
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       throw new Error("The request timed out — please try again.");
+    }
+    if (err instanceof TypeError) {
+      throw new Error("The assistant connection failed. Please check your connection and try again.");
     }
     throw err;
   } finally {
