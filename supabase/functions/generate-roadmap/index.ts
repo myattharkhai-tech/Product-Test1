@@ -89,6 +89,8 @@ Rules:
 
     if (!res.ok) {
       console.error(`AI provider error: status=${res.status} model=${config.AI_MODEL_ID}`);
+      if (res.status === 401 || res.status === 403) throw new Error("Ollama Cloud rejected access. Check AI_API_KEY and model access.");
+      if (res.status === 404) throw new Error("Ollama Cloud model or endpoint not found. Check AI_MODEL_ID and AI_API_ENDPOINT.");
       if (res.status === 429) {
         throw new Error("The assistant is busy right now — please try again in a moment.");
       }
