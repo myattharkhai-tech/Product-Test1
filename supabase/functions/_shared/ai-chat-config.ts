@@ -1,7 +1,7 @@
 // ════════════════════════════════════════════════════════════════════
 // AI Chat Configuration — the ONLY file to change when swapping providers.
 //
-// Currently configured for Ollama running the gemma4 model.
+// Configured for Ollama Cloud using server-side secrets.
 //
 // To point at a different model or provider in the future:
 //   1. Set AI_MODEL_ID to the new model's exact identifier string.
@@ -32,8 +32,8 @@ const DEFAULT_SYSTEM_PROMPT = [
 
 // ── Startup validation: fail loudly if required config is missing ──────
 export function loadAIConfig(): AIChatConfig {
-  const modelId = Deno.env.get("AI_MODEL_ID") ?? "gemma4";
-  const endpoint = Deno.env.get("AI_API_ENDPOINT") ?? "http://localhost:11434/api/chat";
+  const modelId = Deno.env.get("AI_MODEL_ID") ?? "gpt-oss:120b";
+  const endpoint = Deno.env.get("AI_API_ENDPOINT") ?? "https://ollama.com/api/chat";
   const apiKey = Deno.env.get("AI_API_KEY") ?? "";
 
   if (!endpoint) {
@@ -43,12 +43,18 @@ export function loadAIConfig(): AIChatConfig {
     throw new Error("AI chat config validation failed: AI_MODEL_ID is not set.");
   }
 
+  if (!apiKey.trim()) throw new Error("Set AI_API_KEY in your Supabase Edge Function secrets before using chat.");
+  const url = new URL(endpoint);
+  if (url.protocol !== "https:" || ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
+    throw new Error("AI_API_ENDPOINT must be a hosted HTTPS Ollama chat endpoint.");
+  }
+
   return {
     AI_API_ENDPOINT: endpoint,
     AI_API_KEY: apiKey,
     AI_MODEL_ID: modelId,
     AI_SYSTEM_PROMPT: DEFAULT_SYSTEM_PROMPT,
-    AI_REQUEST_TIMEOUT: 30000,
+    AI_REQUEST_TIMEOUT: 120000,
     AI_MAX_TOKENS: 1024,
     AI_MAX_INPUT_CHARS: 2000,
   };
@@ -121,6 +127,8 @@ export async function sendChatMessage(
       console.error(
         `AI provider error: status=${res.status} model=${config.AI_MODEL_ID}`,
       );
+      if (res.status === 401 || res.status === 403) throw new Error("Ollama Cloud rejected access. Check AI_API_KEY and model access.");
+      if (res.status === 404) throw new Error("Ollama Cloud model or endpoint not found. Check AI_MODEL_ID and AI_API_ENDPOINT.");
       if (res.status === 429) {
         throw new Error("The assistant is busy right now — please try again in a moment.");
       }
@@ -198,6 +206,8 @@ export async function* streamChatMessage(
       console.error(
         `AI provider stream error: status=${res.status} model=${config.AI_MODEL_ID}`,
       );
+      if (res.status === 401 || res.status === 403) throw new Error("Ollama Cloud rejected access. Check AI_API_KEY and model access.");
+      if (res.status === 404) throw new Error("Ollama Cloud model or endpoint not found. Check AI_MODEL_ID and AI_API_ENDPOINT.");
       if (res.status === 429) {
         throw new Error("The assistant is busy right now — please try again in a moment.");
       }
@@ -211,27 +221,27 @@ export async function* streamChatMessage(
 
     const decoder = new TextDecoder();
     let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const parsed = JSON.parse(trimmed);
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        if (done && buffer) lines.push(buffer);
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let parsed;
+          try { parsed = JSON.parse(line); }
+          catch { throw new Error("The AI provider returned an invalid response."); }
+          if (parsed.error) throw new Error("The AI provider could not complete the reply. Check the model and account limits.");
+          if (typeof parsed.message?.content === "string" && parsed.message.content) yield parsed.message.content;
           if (parsed.done) return;
-          const text = parsed?.message?.content;
-          if (text) yield text;
-        } catch {
-          // Skip malformed chunks
         }
+        if (done) throw new Error("The AI provider disconnected before completing the reply.");
       }
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
     }
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {

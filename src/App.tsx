@@ -71,12 +71,7 @@ function App() {
     }
   };
 
-  const handleFileProcessed = (
-    _filename: string,
-    _subjectName: string,
-    _isExisting: boolean,
-    _subjectId: string | null
-  ) => {
+  const handleFileProcessed = () => {
     // Chat-uploaded files are handled by the ChatPanel itself now via the edge function
   };
 
