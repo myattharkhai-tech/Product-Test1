@@ -1,9 +1,10 @@
 // ════════════════════════════════════════════════════════════════════
 // AI Chat Configuration — the ONLY file to change when swapping providers.
 //
-// Currently configured for Ollama running the gemma4 model.
+// Uses the OpenAI-compatible chat completions API format, which works with
+// OpenAI, Groq, Together AI, OpenRouter, and most other providers.
 //
-// To point at a different model or provider in the future:
+// To point at a different model or provider:
 //   1. Set AI_MODEL_ID to the new model's exact identifier string.
 //   2. Set AI_API_ENDPOINT to the new provider's chat endpoint URL.
 //   3. Set AI_API_KEY in the edge function secrets (if the new provider requires one).
@@ -32,8 +33,9 @@ const DEFAULT_SYSTEM_PROMPT = [
 
 // ── Startup validation: fail loudly if required config is missing ──────
 export function loadAIConfig(): AIChatConfig {
-  const modelId = Deno.env.get("AI_MODEL_ID") ?? "gemma4";
-  const endpoint = Deno.env.get("AI_API_ENDPOINT") ?? "http://localhost:11434/api/chat";
+  const modelId = Deno.env.get("AI_MODEL_ID") ?? "gpt-4o-mini";
+  const endpoint = Deno.env.get("AI_API_ENDPOINT") ??
+    "https://api.openai.com/v1/chat/completions";
   const apiKey = Deno.env.get("AI_API_KEY") ?? "";
 
   if (!endpoint) {
@@ -60,8 +62,8 @@ export interface ChatTurn {
   content: string;
 }
 
-// ── Ollama message type ────────────────────────────────────────────────
-interface OllamaMessage {
+// ── OpenAI-compatible message type ─────────────────────────────────────
+interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
 }
@@ -84,7 +86,7 @@ export async function sendChatMessage(
     ? `${config.AI_SYSTEM_PROMPT}\n${extraContext}`
     : config.AI_SYSTEM_PROMPT;
 
-  const messages: OllamaMessage[] = [
+  const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt },
     ...history.map((turn) => ({
       role: turn.role as "user" | "assistant",
@@ -110,10 +112,8 @@ export async function sendChatMessage(
         model: config.AI_MODEL_ID,
         messages,
         stream: false,
-        options: {
-          temperature: 0.7,
-          num_predict: config.AI_MAX_TOKENS,
-        },
+        max_tokens: config.AI_MAX_TOKENS,
+        temperature: 0.7,
       }),
     });
 
@@ -128,7 +128,7 @@ export async function sendChatMessage(
     }
 
     const data = await res.json();
-    const text = data?.message?.content;
+    const text = data?.choices?.[0]?.message?.content;
     if (!text) {
       throw new Error("The assistant returned an empty response. Please try rephrasing.");
     }
@@ -144,7 +144,7 @@ export async function sendChatMessage(
 }
 
 // ── Streaming adapter: yields text chunks as they arrive ──────────────
-// Ollama streams newline-delimited JSON objects, each with a "message.content" field.
+// Uses OpenAI-compatible SSE streaming (data: { ... } lines terminated by [DONE])
 export async function* streamChatMessage(
   config: AIChatConfig,
   history: ChatTurn[],
@@ -161,7 +161,7 @@ export async function* streamChatMessage(
     ? `${config.AI_SYSTEM_PROMPT}\n${extraContext}`
     : config.AI_SYSTEM_PROMPT;
 
-  const messages: OllamaMessage[] = [
+  const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt },
     ...history.map((turn) => ({
       role: turn.role as "user" | "assistant",
@@ -187,10 +187,8 @@ export async function* streamChatMessage(
         model: config.AI_MODEL_ID,
         messages,
         stream: true,
-        options: {
-          temperature: 0.7,
-          num_predict: config.AI_MAX_TOKENS,
-        },
+        max_tokens: config.AI_MAX_TOKENS,
+        temperature: 0.7,
       }),
     });
 
@@ -222,11 +220,12 @@ export async function* streamChatMessage(
 
       for (const line of lines) {
         const trimmed = line.trim();
-        if (!trimmed) continue;
+        if (!trimmed || !trimmed.startsWith("data: ")) continue;
+        const jsonStr = trimmed.slice(6);
+        if (jsonStr === "[DONE]") return;
         try {
-          const parsed = JSON.parse(trimmed);
-          if (parsed.done) return;
-          const text = parsed?.message?.content;
+          const parsed = JSON.parse(jsonStr);
+          const text = parsed?.choices?.[0]?.delta?.content;
           if (text) yield text;
         } catch {
           // Skip malformed chunks

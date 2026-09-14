@@ -49,25 +49,14 @@ export interface StreamChatParams {
 export async function* streamChatMessage(
   params: StreamChatParams,
 ): AsyncGenerator<string> {
-  const useLocalModel = import.meta.env.DEV;
-  const res = await fetch(useLocalModel ? '/api/local-chat' : `${SUPABASE_URL}/functions/v1/chat`, {
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(!useLocalModel ? {
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        'apikey': SUPABASE_ANON_KEY,
-      } : {}),
+      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      'apikey': SUPABASE_ANON_KEY,
     },
-    body: JSON.stringify(useLocalModel ? {
-      model: import.meta.env.VITE_OLLAMA_MODEL || 'gemma4:e4b',
-      stream: true,
-      messages: [
-        { role: 'system', content: `You are StudyFlow AI, a friendly university study assistant. Keep answers concise unless asked for detail. Use plain text. The student studies: ${params.subjects.map((s) => s.name).join(', ')}. You can see attachment filenames only, not their contents.` },
-        ...params.history,
-        { role: 'user', content: [params.message, ...(params.attachments ?? []).map((name) => `Attachment filename: ${name}`)].filter(Boolean).join('\n') },
-      ],
-    } : {
+    body: JSON.stringify({
       message: params.message,
       history: params.history,
       subjects: params.subjects.map((s) => s.name),
@@ -77,7 +66,7 @@ export async function* streamChatMessage(
 
   if (!res.ok) {
     const details = await res.json().catch(() => null);
-    throw new Error(details?.error || `Unable to reach the assistant (HTTP ${res.status}). ${useLocalModel ? 'Check that Ollama is running.' : 'Check the chat backend configuration.'}`);
+    throw new Error(details?.error || `Unable to reach the assistant (HTTP ${res.status}). Please try again.`);
   }
 
   if (!res.body) {
@@ -89,32 +78,32 @@ export async function* streamChatMessage(
   let buffer = '';
 
   try {
-  while (true) {
-    const { done, value } = await reader.read();
-    buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-    if (done && buffer) { lines.push(buffer); buffer = ''; }
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      if (done && buffer) { lines.push(buffer); buffer = ''; }
 
-    for (const line of lines) {
-      if (!useLocalModel && !line.startsWith('data:')) continue;
-      const jsonStr = (useLocalModel ? line : line.slice(5)).trim();
-      if (!jsonStr) continue;
-      let parsed;
-      try {
-        parsed = JSON.parse(jsonStr);
-      } catch {
-        throw new Error('The assistant sent an invalid response. Please try again.');
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const jsonStr = line.slice(5).trim();
+        if (!jsonStr) continue;
+        let parsed;
+        try {
+          parsed = JSON.parse(jsonStr);
+        } catch {
+          throw new Error('The assistant sent an invalid response. Please try again.');
+        }
+        if (parsed.type === 'error' || parsed.error) {
+          throw new Error(parsed.error || 'An error occurred during streaming.');
+        }
+        const text = parsed.type === 'chunk' ? parsed.text : null;
+        if (typeof text === 'string' && text) yield text;
+        if (parsed.type === 'done') return;
       }
-      if (parsed.type === 'error' || parsed.error) {
-        throw new Error(parsed.error || 'An error occurred during streaming.');
-      }
-      const text = useLocalModel ? parsed.message?.content : parsed.type === 'chunk' ? parsed.text : null;
-      if (typeof text === 'string' && text) yield text;
-      if (parsed.type === 'done' || parsed.done) return;
+      if (done) throw new Error('The assistant connection ended before the reply completed. Please try again.');
     }
-    if (done) throw new Error('The assistant connection ended before the reply completed. Please try again.');
-  }
   } finally {
     await reader.cancel().catch(() => {});
     reader.releaseLock();

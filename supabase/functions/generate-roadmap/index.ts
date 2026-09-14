@@ -79,11 +79,9 @@ Rules:
         model: config.AI_MODEL_ID,
         messages: [{ role: "user", content: fullPrompt }],
         stream: false,
-        format: "json",
-        options: {
-          temperature: 0.7,
-          num_predict: 4096,
-        },
+        max_tokens: 4096,
+        temperature: 0.7,
+        response_format: { type: "json_object" },
       }),
     });
 
@@ -96,7 +94,7 @@ Rules:
     }
 
     const data = await res.json();
-    const text = data?.message?.content;
+    const text = data?.choices?.[0]?.message?.content;
     if (!text) {
       throw new Error("The AI returned an empty response. Please try again.");
     }
