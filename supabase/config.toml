@@ -1,0 +1,5 @@
+[functions.generate-roadmap]
+verify_jwt = false
+
+[functions.chat]
+verify_jwt = false
