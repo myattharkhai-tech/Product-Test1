@@ -1,27 +1,27 @@
-# StudyFlow for Bolt + Ollama Cloud
+# StudyFlow for Bolt with Google Gemini
 
-This version runs chat through Supabase Edge Functions in both Bolt preview and production. It never connects to Ollama on your PC.
+This version preserves the interface and routes chat and roadmap generation through Supabase to Google's Gemini API. No local Ollama service is needed. Old AI_API_KEY, AI_API_ENDPOINT and AI_MODEL_ID secrets are ignored by this adapter.
 
-## Setup
-1. Bring this source into your Bolt project (or update its connected GitHub repository). Keep your existing project configuration if already connected to Supabase.
-2. Connect the intended Supabase project. Set frontend variables from `.env.example`: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY. Use the public anon key, never a service-role key.
-3. In that SAME Supabase project's Edge Function secrets, set:
-   - AI_MODEL_ID = gpt-oss:120b
-   - AI_API_ENDPOINT = https://ollama.com/api/chat
-   - AI_API_KEY = your Ollama Cloud API key
-4. Deploy BOTH `supabase/functions/chat` and `supabase/functions/generate-roadmap`, including their `_shared` dependency. For a new database, apply the included migration first. The included function config preserves the existing anonymous study-demo behavior.
-5. Restart Bolt's preview after changing frontend variables. Test a short chat message, then publish through Bolt and repeat the test.
+## Install into the existing project
+Replace the project source with this package, or copy these two changed backend files into the existing cloud-ready project:
+- supabase/functions/_shared/ai-chat-config.ts
+- supabase/functions/generate-roadmap/index.ts
+Keep your real .env and Git history; neither is included here. Commit and push the two changed files to your existing fix-chatbox branch, then merge the pull request if Bolt uses main.
 
-The browser sends only the public Supabase configuration. The Ollama key belongs only in backend secrets. No real credentials are included in this archive.
+## Backend setup
+Create a Gemini API key at https://aistudio.google.com/apikey and enter it directly in the connected Supabase project's Edge Function secrets:
+- GEMINI_API_KEY: your full Google Gemini API key
+- GEMINI_MODEL: gemini-3.8-flash (optional; this is the default from Google's current compatibility documentation). Choose another supported text model if your account does not have access. Free quota depends on the model and account; it is not guaranteed by this package.
 
-## Prompt to paste into Bolt
-Use the source in this project. Preserve the StudyFlow interface. Chat must call the Supabase chat Edge Function in preview and production, with no localhost proxy. Connect the correct Supabase project, configure the public frontend variables from .env.example, and deploy chat and generate-roadmap with the shared Ollama Cloud adapter. Use the AI_MODEL_ID, AI_API_ENDPOINT and AI_API_KEY backend secrets. Ask me to enter any missing API key in the secret manager. Test a streamed chat response and show any deployment or provider errors accurately.
+The Google endpoint is fixed in backend code. Do not enter keys in chat, source files or VITE_ variables.
+Deploy BOTH chat and generate-roadmap functions with the updated shared file. Test the Bolt preview and published website. A GitHub push alone does not deploy Supabase functions.
 
-## Validation and limits
-TypeScript, ESLint, production build and mocked streaming regression checks are run during packaging. Cloud end-to-end verification still requires deployed updated functions and valid secrets. The previously configured remote backend was tested and still attempted localhost; changing frontend files alone does not deploy the backend.
+## Paste into Bolt
+Update the existing StudyFlow project using the Gemini version of the shared AI adapter and generate-roadmap function from this package. Keep the frontend calling Supabase in preview and production. Ask me to enter GEMINI_API_KEY through backend secrets, use GEMINI_MODEL=gemini-3.8-flash or a supported model available to my account, and deploy chat and generate-roadmap with their shared dependency to the Supabase project used by VITE_SUPABASE_URL. Test a real streamed chat response and a roadmap. Report missing credentials, deployment failures or quota errors accurately. Do not print keys or claim success before testing.
 
-Existing attachment handling sends filenames rather than document contents; this update does not add document extraction. Existing subjects and quizzes retain their demo behavior. The anonymous demo backend uses an in-memory rate limit, not an account-based production quota system.
+## Validation
+Mocked regression tests pass for secret validation, Google-only routing, streaming, incomplete responses, provider errors, HTTP authentication/access/quota errors, non-streaming replies and roadmap JSON handling. Frontend source and dependencies are unchanged from the previously build/typecheck/lint-verified Bolt package. A live Gemini request and deployed end-to-end test remain pending your key and deployment.
 
-## References
-- https://docs.ollama.com/cloud
-- https://support.bolt.new/integrations/supabase
+Existing demo limitations remain: attachment handling sends filenames, not document contents; subjects and quizzes retain their existing behavior. Anonymous access and in-memory rate limiting remain as in the original demo.
+
+Official protocol reference: https://ai.google.dev/gemini-api/docs/openai

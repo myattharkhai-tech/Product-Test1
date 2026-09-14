@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { loadAIConfig, checkRateLimit, sanitizeForLog } from "../_shared/ai-chat-config.ts";
+import { loadAIConfig, throwProviderError, checkRateLimit, sanitizeForLog } from "../_shared/ai-chat-config.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -79,24 +79,18 @@ Rules:
         model: config.AI_MODEL_ID,
         messages: [{ role: "user", content: fullPrompt }],
         stream: false,
-        format: "json",
-        options: {
-          temperature: 0.7,
-          num_predict: 4096,
-        },
+        response_format: { type: "json_object" },
+        max_tokens: 8192,
       }),
     });
 
     if (!res.ok) {
       console.error(`AI provider error: status=${res.status} model=${config.AI_MODEL_ID}`);
-      if (res.status === 429) {
-        throw new Error("The assistant is busy right now — please try again in a moment.");
-      }
-      throw new Error("Having trouble generating your roadmap — try again in a moment.");
+      throwProviderError(res.status);
     }
 
     const data = await res.json();
-    const text = data?.message?.content;
+    const text = data?.choices?.[0]?.message?.content;
     if (!text) {
       throw new Error("The AI returned an empty response. Please try again.");
     }

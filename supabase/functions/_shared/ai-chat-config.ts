@@ -1,15 +1,4 @@
-// ════════════════════════════════════════════════════════════════════
-// AI Chat Configuration — the ONLY file to change when swapping providers.
-//
-// Configured for Ollama Cloud using server-side secrets.
-//
-// To point at a different model or provider in the future:
-//   1. Set AI_MODEL_ID to the new model's exact identifier string.
-//   2. Set AI_API_ENDPOINT to the new provider's chat endpoint URL.
-//   3. Set AI_API_KEY in the edge function secrets (if the new provider requires one).
-// No other file in the codebase needs to change.
-// ════════════════════════════════════════════════════════════════════
-
+// Gemini through Google's OpenAI-compatible API. Secrets remain on the backend.
 export interface AIChatConfig {
   readonly AI_API_ENDPOINT: string;
   readonly AI_API_KEY: string;
@@ -32,9 +21,9 @@ const DEFAULT_SYSTEM_PROMPT = [
 
 // ── Startup validation: fail loudly if required config is missing ──────
 export function loadAIConfig(): AIChatConfig {
-  const modelId = Deno.env.get("AI_MODEL_ID") ?? "gpt-oss:120b";
-  const endpoint = Deno.env.get("AI_API_ENDPOINT") ?? "https://ollama.com/api/chat";
-  const apiKey = Deno.env.get("AI_API_KEY") ?? "";
+  const modelId = Deno.env.get("GEMINI_MODEL")?.trim() || "gemini-3.8-flash";
+  const endpoint = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+  const apiKey = Deno.env.get("GEMINI_API_KEY")?.trim() ?? "";
 
   if (!endpoint) {
     throw new Error("AI chat config validation failed: AI_API_ENDPOINT is not set.");
@@ -43,10 +32,10 @@ export function loadAIConfig(): AIChatConfig {
     throw new Error("AI chat config validation failed: AI_MODEL_ID is not set.");
   }
 
-  if (!apiKey.trim()) throw new Error("Set AI_API_KEY in your Supabase Edge Function secrets before using chat.");
+  if (!apiKey.trim()) throw new Error("Set GEMINI_API_KEY in your Supabase Edge Function secrets before using chat.");
   const url = new URL(endpoint);
   if (url.protocol !== "https:" || ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
-    throw new Error("AI_API_ENDPOINT must be a hosted HTTPS Ollama chat endpoint.");
+    throw new Error("AI_API_ENDPOINT must be a hosted HTTPS Gemini chat endpoint.");
   }
 
   return {
@@ -55,7 +44,7 @@ export function loadAIConfig(): AIChatConfig {
     AI_MODEL_ID: modelId,
     AI_SYSTEM_PROMPT: DEFAULT_SYSTEM_PROMPT,
     AI_REQUEST_TIMEOUT: 120000,
-    AI_MAX_TOKENS: 1024,
+    AI_MAX_TOKENS: 8192,
     AI_MAX_INPUT_CHARS: 2000,
   };
 }
@@ -66,8 +55,8 @@ export interface ChatTurn {
   content: string;
 }
 
-// ── Ollama message type ────────────────────────────────────────────────
-interface OllamaMessage {
+// ── Gemini message type ────────────────────────────────────────────────
+interface ProviderMessage {
   role: "system" | "user" | "assistant";
   content: string;
 }
@@ -90,7 +79,7 @@ export async function sendChatMessage(
     ? `${config.AI_SYSTEM_PROMPT}\n${extraContext}`
     : config.AI_SYSTEM_PROMPT;
 
-  const messages: OllamaMessage[] = [
+  const messages: ProviderMessage[] = [
     { role: "system", content: systemPrompt },
     ...history.map((turn) => ({
       role: turn.role as "user" | "assistant",
@@ -116,10 +105,7 @@ export async function sendChatMessage(
         model: config.AI_MODEL_ID,
         messages,
         stream: false,
-        options: {
-          temperature: 0.7,
-          num_predict: config.AI_MAX_TOKENS,
-        },
+        max_tokens: config.AI_MAX_TOKENS,
       }),
     });
 
@@ -127,16 +113,11 @@ export async function sendChatMessage(
       console.error(
         `AI provider error: status=${res.status} model=${config.AI_MODEL_ID}`,
       );
-      if (res.status === 401 || res.status === 403) throw new Error("Ollama Cloud rejected access. Check AI_API_KEY and model access.");
-      if (res.status === 404) throw new Error("Ollama Cloud model or endpoint not found. Check AI_MODEL_ID and AI_API_ENDPOINT.");
-      if (res.status === 429) {
-        throw new Error("The assistant is busy right now — please try again in a moment.");
-      }
-      throw new Error("Having trouble reaching the assistant — try again in a moment.");
+      throwProviderError(res.status);
     }
 
     const data = await res.json();
-    const text = data?.message?.content;
+    const text = data?.choices?.[0]?.message?.content;
     if (!text) {
       throw new Error("The assistant returned an empty response. Please try rephrasing.");
     }
@@ -152,7 +133,7 @@ export async function sendChatMessage(
 }
 
 // ── Streaming adapter: yields text chunks as they arrive ──────────────
-// Ollama streams newline-delimited JSON objects, each with a "message.content" field.
+// Google streams SSE data events containing choices[].delta.content.
 export async function* streamChatMessage(
   config: AIChatConfig,
   history: ChatTurn[],
@@ -169,7 +150,7 @@ export async function* streamChatMessage(
     ? `${config.AI_SYSTEM_PROMPT}\n${extraContext}`
     : config.AI_SYSTEM_PROMPT;
 
-  const messages: OllamaMessage[] = [
+  const messages: ProviderMessage[] = [
     { role: "system", content: systemPrompt },
     ...history.map((turn) => ({
       role: turn.role as "user" | "assistant",
@@ -195,10 +176,7 @@ export async function* streamChatMessage(
         model: config.AI_MODEL_ID,
         messages,
         stream: true,
-        options: {
-          temperature: 0.7,
-          num_predict: config.AI_MAX_TOKENS,
-        },
+        max_tokens: config.AI_MAX_TOKENS,
       }),
     });
 
@@ -206,12 +184,7 @@ export async function* streamChatMessage(
       console.error(
         `AI provider stream error: status=${res.status} model=${config.AI_MODEL_ID}`,
       );
-      if (res.status === 401 || res.status === 403) throw new Error("Ollama Cloud rejected access. Check AI_API_KEY and model access.");
-      if (res.status === 404) throw new Error("Ollama Cloud model or endpoint not found. Check AI_MODEL_ID and AI_API_ENDPOINT.");
-      if (res.status === 429) {
-        throw new Error("The assistant is busy right now — please try again in a moment.");
-      }
-      throw new Error("Having trouble reaching the assistant — try again in a moment.");
+      throwProviderError(res.status);
     }
 
     const reader = res.body?.getReader();
@@ -229,13 +202,20 @@ export async function* streamChatMessage(
         buffer = lines.pop() ?? "";
         if (done && buffer) lines.push(buffer);
         for (const line of lines) {
-          if (!line.trim()) continue;
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (!payload) continue;
+          if (payload === "[DONE]") return;
           let parsed;
-          try { parsed = JSON.parse(line); }
-          catch { throw new Error("The AI provider returned an invalid response."); }
-          if (parsed.error) throw new Error("The AI provider could not complete the reply. Check the model and account limits.");
-          if (typeof parsed.message?.content === "string" && parsed.message.content) yield parsed.message.content;
-          if (parsed.done) return;
+          try { parsed = JSON.parse(payload); }
+          catch { throw new Error("Gemini returned an invalid response."); }
+          if (parsed.error) throw new Error("Gemini could not complete the reply. Check model access and quota.");
+          const choice = parsed.choices?.[0];
+          const text = choice?.delta?.content;
+          if (typeof text === "string" && text) yield text;
+          if (choice?.finish_reason && choice.finish_reason !== "stop") {
+            throw new Error("Gemini stopped the reply early (" + choice.finish_reason + "). Please try a shorter request.");
+          }
         }
         if (done) throw new Error("The AI provider disconnected before completing the reply.");
       }
@@ -274,4 +254,13 @@ export function checkRateLimit(ip: string): boolean {
 // ── Input sanitization for log lines (prevent log injection) ───────────
 export function sanitizeForLog(input: string): string {
   return input.replace(/[\n\r\t]/g, " ").slice(0, 100);
+}
+
+export function throwProviderError(status: number): never {
+  if (status === 400) throw new Error("Gemini rejected the request. Check GEMINI_API_KEY and GEMINI_MODEL.");
+  if (status === 401) throw new Error("Gemini authentication failed. Replace GEMINI_API_KEY in backend secrets.");
+  if (status === 403) throw new Error("Gemini access denied. Check key restrictions, project permissions and model access.");
+  if (status === 404) throw new Error("Gemini model unavailable. Check GEMINI_MODEL.");
+  if (status === 429) throw new Error("Gemini quota exceeded. Check AI Studio usage and retry later.");
+  throw new Error("Gemini is unavailable (HTTP " + status + "). Please retry later.");
 }
