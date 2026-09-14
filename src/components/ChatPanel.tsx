@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   MessageCircle,
   X,
@@ -11,8 +11,9 @@ import {
   Check,
 } from 'lucide-react';
 import type { ChatMessage, ChatAttachment, RoadmapTopic, Subject } from '@/types';
-import { mockChatMessages, formatFileSize, getFileType } from '@/data/mockData';
+import { formatFileSize, getFileType } from '@/data/mockData';
 import { generateRoadmap, streamChatMessage } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
 
 interface ChatPanelProps {
   onQuizRequest: (topic: RoadmapTopic) => void;
@@ -37,16 +38,79 @@ function getAttachIcon(fileType: ChatAttachment['fileType']) {
 
 export default function ChatPanel({ onQuizRequest, subjects, onFileProcessed }: ChatPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>(mockChatMessages);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const sendingRef = useRef(false);
   const mobileScrollRef = useRef<HTMLDivElement>(null);
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
+
+  // Load chat history from database on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('chat_messages')
+          .select('id, role, content, created_at')
+          .order('created_at', { ascending: true })
+          .limit(100);
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+          const loaded: ChatMessage[] = data.map((row) => ({
+            id: row.id,
+            role: row.role as 'user' | 'assistant',
+            content: row.content,
+            timestamp: row.created_at,
+          }));
+          setMessages(loaded);
+        } else {
+          // No history — seed with the welcome message
+          const welcome: ChatMessage = {
+            id: `${Date.now()}-welcome`,
+            role: 'assistant',
+            content: "Hi! I'm your StudyFlow AI assistant. Ask me to explain a topic, quiz you on something, or upload new materials right here in the chat.",
+            timestamp: new Date().toISOString(),
+          };
+          setMessages([welcome]);
+          await supabase.from('chat_messages').insert({
+            id: welcome.id,
+            role: 'assistant',
+            content: welcome.content,
+          });
+        }
+      } catch {
+        // Fallback to welcome message if DB unavailable
+        setMessages([{
+          id: `${Date.now()}-welcome`,
+          role: 'assistant',
+          content: "Hi! I'm your StudyFlow AI assistant. Ask me to explain a topic, quiz you on something, or upload new materials right here in the chat.",
+          timestamp: new Date().toISOString(),
+        }]);
+      } finally {
+        setIsLoadingHistory(false);
+      }
+    })();
+  }, []);
+
+  // Persist a message to the database
+  const persistMessage = useCallback(async (msg: ChatMessage) => {
+    try {
+      await supabase.from('chat_messages').insert({
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+      });
+    } catch {
+      // Silent fail — chat still works in-memory
+    }
+  }, []);
 
   useEffect(() => {
     if (mobileScrollRef.current) mobileScrollRef.current.scrollTop = mobileScrollRef.current.scrollHeight;
@@ -131,6 +195,7 @@ export default function ChatPanel({ onQuizRequest, subjects, onFileProcessed }: 
       attachments: attachmentsToSend.length > 0 ? attachmentsToSend : undefined,
     };
     setMessages((prev) => [...prev, userMessage]);
+    persistMessage(userMessage);
     setInput('');
     setPendingAttachments(processingAttachments);
     setIsTyping(true);
@@ -175,12 +240,23 @@ export default function ChatPanel({ onQuizRequest, subjects, onFileProcessed }: 
 
         if (!receivedAny) {
           setIsTyping(false);
-          setMessages((prev) => [...prev, {
+          const fallbackContent = 'The assistant returned an empty response. Please try rephrasing.';
+          const fallbackMsg: ChatMessage = {
             id: assistantId,
             role: 'assistant' as const,
-            content: 'The assistant returned an empty response. Please try rephrasing.',
+            content: fallbackContent,
             timestamp: new Date().toISOString(),
-          }]);
+          };
+          setMessages((prev) => [...prev, fallbackMsg]);
+          persistMessage(fallbackMsg);
+        } else {
+          // Persist the final accumulated assistant response
+          persistMessage({
+            id: assistantId,
+            role: 'assistant',
+            content: accumulated,
+            timestamp: new Date().toISOString(),
+          });
         }
 
         if (userMessage.content.toLowerCase().includes('quiz')) {
@@ -196,12 +272,15 @@ export default function ChatPanel({ onQuizRequest, subjects, onFileProcessed }: 
       } catch (error) {
         setIsTyping(false);
         if (!receivedAny) {
-          setMessages((prev) => [...prev, {
+          const errorContent = error instanceof Error ? error.message : 'Having trouble reaching the assistant — try again in a moment.';
+          const errorMsg: ChatMessage = {
             id: assistantId,
             role: 'assistant' as const,
-            content: error instanceof Error ? error.message : 'Having trouble reaching the assistant — try again in a moment.',
+            content: errorContent,
             timestamp: new Date().toISOString(),
-          }]);
+          };
+          setMessages((prev) => [...prev, errorMsg]);
+          persistMessage(errorMsg);
         } else {
           setMessages((prev) => prev.map((m) => m.id === assistantId
             ? { ...m, content: accumulated + '\n\nReply interrupted. Please try again.' }
@@ -256,6 +335,11 @@ export default function ChatPanel({ onQuizRequest, subjects, onFileProcessed }: 
 
           {/* Messages */}
           <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-navy-50/30">
+            {isLoadingHistory && (
+              <div className="flex justify-center py-8">
+                <Loader2 className="w-5 h-5 animate-spin text-navy-300" />
+              </div>
+            )}
             {messages.map((msg) => (
               <div
                 key={msg.id}
@@ -386,7 +470,7 @@ export default function ChatPanel({ onQuizRequest, subjects, onFileProcessed }: 
               />
               <button
                 onClick={sendMessage}
-                disabled={isSending || (!input.trim() && pendingAttachments.filter((a) => a.status === 'ready').length === 0)}
+                disabled={isSending || isLoadingHistory || (!input.trim() && pendingAttachments.filter((a) => a.status === 'ready').length === 0)}
                 className="w-10 h-10 rounded-xl bg-navy-800 text-white flex items-center justify-center
                   transition-all hover:bg-navy-700 active:scale-95
                   disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
@@ -427,6 +511,11 @@ export default function ChatPanel({ onQuizRequest, subjects, onFileProcessed }: 
 
           {/* Messages */}
           <div ref={mobileScrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-navy-50/30">
+            {isLoadingHistory && (
+              <div className="flex justify-center py-8">
+                <Loader2 className="w-5 h-5 animate-spin text-navy-300" />
+              </div>
+            )}
             {messages.map((msg) => (
               <div
                 key={msg.id}
@@ -556,7 +645,7 @@ export default function ChatPanel({ onQuizRequest, subjects, onFileProcessed }: 
               />
               <button
                 onClick={sendMessage}
-                disabled={isSending || (!input.trim() && pendingAttachments.filter((a) => a.status === 'ready').length === 0)}
+                disabled={isSending || isLoadingHistory || (!input.trim() && pendingAttachments.filter((a) => a.status === 'ready').length === 0)}
                 className="w-10 h-10 rounded-xl bg-navy-800 text-white flex items-center justify-center
                   transition-all hover:bg-navy-700 active:scale-95
                   disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
