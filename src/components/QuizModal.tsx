@@ -1,20 +1,54 @@
-import { useState } from 'react';
-import { X, Check, ChevronRight, RotateCcw, Trophy } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { X, Check, ChevronRight, RotateCcw, Trophy, Loader2, AlertCircle } from 'lucide-react';
 import type { QuizQuestion, RoadmapTopic } from '@/types';
-import { mockQuizQuestions } from '@/data/mockData';
+import { generateQuiz } from '@/lib/api';
 
 interface QuizModalProps {
   topic: RoadmapTopic | null;
   onClose: () => void;
 }
 
+type Phase = 'loading' | 'ready' | 'error';
+
 export default function QuizModal({ topic, onClose }: QuizModalProps) {
-  const questions: QuizQuestion[] = mockQuizQuestions;
+  const [questions, setQuestions] = useState<QuizQuestion[]>([]);
+  const [phase, setPhase] = useState<Phase>('loading');
+  const [errorMsg, setErrorMsg] = useState('');
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [score, setScore] = useState(0);
   const [finished, setFinished] = useState(false);
+
+  const fetchQuestions = useCallback(async () => {
+    if (!topic) return;
+    setPhase('loading');
+    setErrorMsg('');
+    setCurrentIndex(0);
+    setSelectedAnswer(null);
+    setSubmitted(false);
+    setScore(0);
+    setFinished(false);
+
+    try {
+      const result = await generateQuiz({
+        topic: topic.title,
+        subject: topic.subject,
+        count: 5,
+      });
+      setQuestions(result);
+      setPhase('ready');
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to generate quiz questions.');
+      setPhase('error');
+    }
+  }, [topic]);
+
+  useEffect(() => {
+    if (topic) {
+      fetchQuestions();
+    }
+  }, [topic, fetchQuestions]);
 
   if (!topic) return null;
 
@@ -40,11 +74,7 @@ export default function QuizModal({ topic, onClose }: QuizModalProps) {
   };
 
   const handleRestart = () => {
-    setCurrentIndex(0);
-    setSelectedAnswer(null);
-    setSubmitted(false);
-    setScore(0);
-    setFinished(false);
+    fetchQuestions();
   };
 
   return (
@@ -70,7 +100,34 @@ export default function QuizModal({ topic, onClose }: QuizModalProps) {
           </button>
         </div>
 
-        {finished ? (
+        {phase === 'loading' && (
+          <div className="flex flex-col items-center justify-center py-16 animate-fade-in">
+            <Loader2 className="w-8 h-8 text-navy-400 animate-spin mb-4" />
+            <p className="text-navy-500 text-sm">Generating quiz questions about {topic.title}…</p>
+            <p className="text-navy-300 text-xs mt-1">This usually takes a few seconds</p>
+          </div>
+        )}
+
+        {phase === 'error' && (
+          <div className="flex flex-col items-center justify-center py-12 animate-fade-in">
+            <div className="w-14 h-14 rounded-2xl bg-coral-50 flex items-center justify-center mb-4">
+              <AlertCircle className="w-7 h-7 text-coral-500" />
+            </div>
+            <h3 className="font-serif text-lg text-navy-800 mb-2">Couldn't load quiz</h3>
+            <p className="text-navy-500 text-sm text-center mb-6 max-w-xs">{errorMsg}</p>
+            <div className="flex gap-3">
+              <button onClick={fetchQuestions} className="btn-primary flex items-center gap-2">
+                <RotateCcw className="w-4 h-4" />
+                Try again
+              </button>
+              <button onClick={onClose} className="btn-ghost">
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+
+        {phase === 'ready' && finished && (
           /* Results screen */
           <div className="text-center py-8 animate-scale-in">
             <div className="w-20 h-20 rounded-full bg-teal-50 flex items-center justify-center mx-auto mb-5">
@@ -89,14 +146,16 @@ export default function QuizModal({ topic, onClose }: QuizModalProps) {
             <div className="flex items-center justify-center gap-3">
               <button onClick={handleRestart} className="btn-primary flex items-center gap-2">
                 <RotateCcw className="w-4 h-4" />
-                Try again
+                New quiz
               </button>
               <button onClick={onClose} className="btn-ghost">
                 Back to roadmap
               </button>
             </div>
           </div>
-        ) : (
+        )}
+
+        {phase === 'ready' && !finished && (
           <>
             {/* Progress dots */}
             <div className="flex items-center gap-2 mb-6">

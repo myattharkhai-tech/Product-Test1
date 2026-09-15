@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { RoadmapDay, Subject } from '@/types';
+import type { QuizQuestion, RoadmapDay, Subject } from '@/types';
 
 export interface GenerateRoadmapResult {
   subject_name: string;
@@ -30,6 +30,30 @@ export async function generateRoadmap(params: {
   }
 
   return data as GenerateRoadmapResult;
+}
+
+export async function generateQuiz(params: {
+  topic: string;
+  subject?: string;
+  count?: number;
+}): Promise<QuizQuestion[]> {
+  const { data, error } = await supabase.functions.invoke('generate-quiz', {
+    body: {
+      topic: params.topic,
+      subject: params.subject ?? '',
+      count: params.count ?? 5,
+    },
+  });
+
+  if (error) {
+    throw new Error('Failed to generate quiz questions. Please try again.');
+  }
+
+  if (data?.error) {
+    throw new Error(data.error);
+  }
+
+  return data?.questions as QuizQuestion[];
 }
 
 // ── Streaming chat: calls the edge function and yields text chunks ────

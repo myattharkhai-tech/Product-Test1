@@ -184,14 +184,16 @@ export default function ChatPanel({ onQuizRequest, subjects, onFileProcessed }: 
         }
 
         if (userMessage.content.toLowerCase().includes('quiz')) {
-          onQuizRequest({
-            id: 'chat-quiz',
-            title: 'Quick Quiz',
-            subject: 'Mixed',
-            subjectId: '',
-            estimatedMinutes: 15,
-            completed: false,
-          });
+          const allTopics = subjects.flatMap((s) =>
+            s.roadmap.flatMap((d) => d.topics)
+          );
+          if (allTopics.length > 0) {
+            const lowerMsg = userMessage.content.toLowerCase();
+            const matched = allTopics.find((t) =>
+              lowerMsg.includes(t.title.toLowerCase())
+            ) ?? allTopics[Math.floor(Math.random() * allTopics.length)];
+            onQuizRequest(matched);
+          }
         }
       } catch (error) {
         setIsTyping(false);
