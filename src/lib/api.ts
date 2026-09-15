@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { QuizQuestion, RoadmapDay, Subject } from '@/types';
+import type { QuizAttempt, QuizQuestion, RoadmapDay, Subject } from '@/types';
 
 export interface GenerateRoadmapResult {
   subject_name: string;
@@ -54,6 +54,56 @@ export async function generateQuiz(params: {
   }
 
   return data?.questions as QuizQuestion[];
+}
+
+// ── Quiz attempt persistence ──────────────────────────────────────────
+
+export async function saveQuizAttempt(attempt: {
+  topic_title: string;
+  subject_name: string;
+  questions: QuizQuestion[];
+  answers: (number | null)[];
+  score: number;
+  answered_count: number;
+  total_questions: number;
+  completed: boolean;
+}): Promise<QuizAttempt | null> {
+  const { data, error } = await supabase
+    .from('quiz_attempts')
+    .insert({
+      topic_title: attempt.topic_title,
+      subject_name: attempt.subject_name,
+      questions: attempt.questions,
+      answers: attempt.answers,
+      score: attempt.score,
+      answered_count: attempt.answered_count,
+      total_questions: attempt.total_questions,
+      completed: attempt.completed,
+    })
+    .select()
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as QuizAttempt | null;
+}
+
+export async function fetchQuizAttempts(): Promise<QuizAttempt[]> {
+  const { data, error } = await supabase
+    .from('quiz_attempts')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return (data as QuizAttempt[]) ?? [];
+}
+
+export async function deleteQuizAttempt(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('quiz_attempts')
+    .delete()
+    .eq('id', id);
+
+  if (error) throw error;
 }
 
 // ── Streaming chat: calls the edge function and yields text chunks ────

@@ -1,16 +1,17 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { X, Check, ChevronRight, RotateCcw, Trophy, Loader2, AlertCircle } from 'lucide-react';
 import type { QuizQuestion, RoadmapTopic } from '@/types';
-import { generateQuiz } from '@/lib/api';
+import { generateQuiz, saveQuizAttempt } from '@/lib/api';
 
 interface QuizModalProps {
   topic: RoadmapTopic | null;
   onClose: () => void;
+  onQuizComplete?: () => void;
 }
 
 type Phase = 'loading' | 'ready' | 'error';
 
-export default function QuizModal({ topic, onClose }: QuizModalProps) {
+export default function QuizModal({ topic, onClose, onQuizComplete }: QuizModalProps) {
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [phase, setPhase] = useState<Phase>('loading');
   const [errorMsg, setErrorMsg] = useState('');
@@ -19,6 +20,12 @@ export default function QuizModal({ topic, onClose }: QuizModalProps) {
   const [submitted, setSubmitted] = useState(false);
   const [score, setScore] = useState(0);
   const [finished, setFinished] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const answersRef = useRef<(number | null)[]>([]);
+  const scoreRef = useRef(0);
+  const answeredCountRef = useRef(0);
+  const savedRef = useRef(false);
 
   const fetchQuestions = useCallback(async () => {
     if (!topic) return;
@@ -29,6 +36,7 @@ export default function QuizModal({ topic, onClose }: QuizModalProps) {
     setSubmitted(false);
     setScore(0);
     setFinished(false);
+    savedRef.current = false;
 
     try {
       const result = await generateQuiz({
@@ -36,7 +44,11 @@ export default function QuizModal({ topic, onClose }: QuizModalProps) {
         subject: topic.subject,
         count: 5,
       });
-      setQuestions(result);
+      const withIds = result.map((q, i) => ({ ...q, id: `q-${i}` }));
+      setQuestions(withIds);
+      answersRef.current = new Array(withIds.length).fill(null);
+      scoreRef.current = 0;
+      answeredCountRef.current = 0;
       setPhase('ready');
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to generate quiz questions.');
@@ -50,6 +62,40 @@ export default function QuizModal({ topic, onClose }: QuizModalProps) {
     }
   }, [topic, fetchQuestions]);
 
+  const saveAttempt = useCallback(
+    async (completed: boolean) => {
+      if (!topic || savedRef.current || questions.length === 0) return;
+      savedRef.current = true;
+      setSaving(true);
+      try {
+        await saveQuizAttempt({
+          topic_title: topic.title,
+          subject_name: topic.subject,
+          questions,
+          answers: answersRef.current,
+          score: scoreRef.current,
+          answered_count: answeredCountRef.current,
+          total_questions: questions.length,
+          completed,
+        });
+        onQuizComplete?.();
+      } catch {
+        savedRef.current = false;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [topic, questions, onQuizComplete],
+  );
+
+  // Save incomplete attempt when user closes mid-quiz
+  const handleClose = useCallback(() => {
+    if (phase === 'ready' && !finished && answeredCountRef.current > 0) {
+      saveAttempt(false);
+    }
+    onClose();
+  }, [phase, finished, saveAttempt, onClose]);
+
   if (!topic) return null;
 
   const question = questions[currentIndex];
@@ -58,14 +104,18 @@ export default function QuizModal({ topic, onClose }: QuizModalProps) {
   const handleSubmit = () => {
     if (selectedAnswer === null) return;
     setSubmitted(true);
+    answersRef.current[currentIndex] = selectedAnswer;
+    answeredCountRef.current = answeredCountRef.current + 1;
     if (selectedAnswer === question.correctIndex) {
       setScore((s) => s + 1);
+      scoreRef.current = scoreRef.current + 1;
     }
   };
 
   const handleNext = () => {
     if (isLast) {
       setFinished(true);
+      saveAttempt(true);
       return;
     }
     setCurrentIndex((i) => i + 1);
@@ -80,7 +130,7 @@ export default function QuizModal({ topic, onClose }: QuizModalProps) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-navy-950/40 backdrop-blur-sm animate-fade-in"
-      onClick={onClose}
+      onClick={handleClose}
     >
       <div
         className="card w-full max-w-lg p-6 sm:p-8 animate-scale-in max-h-[90vh] overflow-y-auto"
@@ -93,7 +143,7 @@ export default function QuizModal({ topic, onClose }: QuizModalProps) {
             <h2 className="font-serif text-xl text-navy-800">{topic.title}</h2>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="w-9 h-9 rounded-lg flex items-center justify-center text-navy-400 hover:text-navy-700 hover:bg-navy-50 transition-all"
           >
             <X className="w-5 h-5" />
@@ -120,7 +170,7 @@ export default function QuizModal({ topic, onClose }: QuizModalProps) {
                 <RotateCcw className="w-4 h-4" />
                 Try again
               </button>
-              <button onClick={onClose} className="btn-ghost">
+              <button onClick={handleClose} className="btn-ghost">
                 Close
               </button>
             </div>
@@ -143,12 +193,18 @@ export default function QuizModal({ topic, onClose }: QuizModalProps) {
                 ? "Good work! Review the ones you missed and try again."
                 : "Keep studying — you'll get there. Review the material and retry."}
             </p>
+            {saving && (
+              <p className="text-navy-400 text-xs mb-4 flex items-center justify-center gap-1.5">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Saving your quiz…
+              </p>
+            )}
             <div className="flex items-center justify-center gap-3">
               <button onClick={handleRestart} className="btn-primary flex items-center gap-2">
                 <RotateCcw className="w-4 h-4" />
                 New quiz
               </button>
-              <button onClick={onClose} className="btn-ghost">
+              <button onClick={handleClose} className="btn-ghost">
                 Back to roadmap
               </button>
             </div>

@@ -40,6 +40,19 @@ export interface QuizQuestion {
   explanation: string;
 }
 
+export interface QuizAttempt {
+  id: string;
+  topic_title: string;
+  subject_name: string;
+  questions: QuizQuestion[];
+  answers: (number | null)[];
+  score: number;
+  answered_count: number;
+  total_questions: number;
+  completed: boolean;
+  created_at: string;
+}
+
 export interface StudySession {
   id: string;
   day: number; // 0 = Monday, 6 = Sunday

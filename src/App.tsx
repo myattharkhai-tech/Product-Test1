@@ -15,6 +15,7 @@ function App() {
   const [quizTopic, setQuizTopic] = useState<RoadmapTopic | null>(null);
   const [subjects, setSubjects] = useState<Subject[]>(mockSubjects);
   const [activeSubjectId, setActiveSubjectId] = useState<string | null>(null);
+  const [quizRefreshKey, setQuizRefreshKey] = useState(0);
 
   const handleQuizRequest = (topic: RoadmapTopic) => {
     setQuizTopic(topic);
@@ -109,6 +110,7 @@ function App() {
                 onOpenSubject={handleOpenSubject}
                 onNewSubject={handleNewSubject}
                 onDeleteSubject={handleDeleteSubject}
+                quizRefreshKey={quizRefreshKey}
               />
             )}
             {screen === 'subject-roadmap' && activeSubject && (
@@ -137,7 +139,11 @@ function App() {
       </div>
 
       {/* Quiz modal — triggered from roadmap or chat */}
-      <QuizModal topic={quizTopic} onClose={() => setQuizTopic(null)} />
+      <QuizModal
+        topic={quizTopic}
+        onClose={() => setQuizTopic(null)}
+        onQuizComplete={() => setQuizRefreshKey((k) => k + 1)}
+      />
     </div>
   );
 }
