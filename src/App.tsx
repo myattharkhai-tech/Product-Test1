@@ -34,6 +34,14 @@ function App() {
     setScreen('upload');
   };
 
+  const handleDeleteSubject = (subjectId: string) => {
+    setSubjects((prev) => prev.filter((s) => s.id !== subjectId));
+    if (activeSubjectId === subjectId) {
+      setActiveSubjectId(null);
+      setScreen('roadmap');
+    }
+  };
+
   const handleCreateRoadmap = (
     subject: Subject | null,
     isExisting: boolean,
@@ -100,6 +108,7 @@ function App() {
                 subjects={subjects}
                 onOpenSubject={handleOpenSubject}
                 onNewSubject={handleNewSubject}
+                onDeleteSubject={handleDeleteSubject}
               />
             )}
             {screen === 'subject-roadmap' && activeSubject && (
@@ -115,7 +124,7 @@ function App() {
                 onCreateRoadmap={handleCreateRoadmap}
               />
             )}
-            {screen === 'calendar' && <CalendarScreen />}
+            {screen === 'calendar' && <CalendarScreen subjects={subjects} />}
           </div>
 
           {/* Desktop chat panel — docked as a right column */}
