@@ -108,7 +108,7 @@ function AppContent() {
 
   return (
     <div className="flex min-h-screen bg-navy-50">
-      <Sidebar current={screen} onNavigate={setScreen} />
+      <Sidebar current={screen} onNavigate={setScreen} onManagePlan={() => showUpgrade()} />
 
       <div className="flex-1 flex flex-col min-w-0 pb-16 sm:pb-0">
         <header className="sm:hidden flex items-center gap-2.5 px-5 py-4 bg-navy-800 text-white sticky top-0 z-20">
