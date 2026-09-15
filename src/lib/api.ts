@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { QuizAttempt, QuizQuestion, RoadmapDay, Subject } from '@/types';
+import type { QuizAttempt, QuizQuestion, RoadmapDay, StudySession, Subject } from '@/types';
 
 export interface GenerateRoadmapResult {
   subject_name: string;
@@ -123,6 +123,35 @@ export async function updateQuizAttempt(id: string, updates: {
     .eq('id', id);
 
   if (error) throw error;
+}
+
+// ── Google Calendar sync ──────────────────────────────────────────────
+
+export async function syncCalendar(sessions: StudySession[]): Promise<{ synced: number }> {
+  const { data, error } = await supabase.functions.invoke('sync-calendar', {
+    body: { action: 'sync', sessions },
+  });
+
+  if (error) {
+    throw new Error('Failed to reach the calendar sync service. Please try again.');
+  }
+  if (data?.error) {
+    throw new Error(data.error);
+  }
+  return { synced: data?.synced ?? 0 };
+}
+
+export async function disconnectCalendar(): Promise<void> {
+  const { data, error } = await supabase.functions.invoke('sync-calendar', {
+    body: { action: 'disconnect' },
+  });
+
+  if (error) {
+    throw new Error('Failed to disconnect Google Calendar.');
+  }
+  if (data?.error) {
+    throw new Error(data.error);
+  }
 }
 
 // ── Streaming chat: calls the edge function and yields text chunks ────

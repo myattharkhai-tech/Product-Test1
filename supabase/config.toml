@@ -6,3 +6,6 @@ verify_jwt = false
 
 [functions.generate-quiz]
 verify_jwt = false
+
+[functions.sync-calendar]
+verify_jwt = false

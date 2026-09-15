@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react';
-import { Calendar, Check, Link2, Unlink, Clock3, BookOpen } from 'lucide-react';
+import { useState, useMemo, useCallback } from 'react';
+import { Calendar, Check, Link2, Unlink, Clock3, BookOpen, Loader2, AlertCircle } from 'lucide-react';
 import type { Subject, StudySession } from '@/types';
+import { syncCalendar, disconnectCalendar } from '@/lib/api';
 
 interface CalendarScreenProps {
   subjects: Subject[];
@@ -31,11 +32,6 @@ function formatHour(hour: number): string {
   return `${display}:${m} ${period}`;
 }
 
-// ── Derive study sessions from subjects ───────────────────────────────
-// Each roadmap day maps to a calendar day (0=Mon … 6=Sun).
-// The first topic of each day gets a time slot; subsequent topics stack
-// immediately after. Sessions are regenerated whenever subjects change,
-// so adding or deleting a subject automatically updates the calendar.
 const TIME_SLOTS = [9, 10.5, 14, 15.5, 17];
 
 function deriveSessions(subjects: Subject[]): StudySession[] {
@@ -65,12 +61,44 @@ function deriveSessions(subjects: Subject[]): StudySession[] {
   return sessions;
 }
 
+type SyncState = 'idle' | 'connecting' | 'connected' | 'syncing' | 'disconnecting' | 'error';
+
 export default function CalendarScreen({ subjects }: CalendarScreenProps) {
-  const [googleConnected, setGoogleConnected] = useState(false);
+  const [syncState, setSyncState] = useState<SyncState>('idle');
+  const [syncedCount, setSyncedCount] = useState(0);
+  const [errorMsg, setErrorMsg] = useState('');
 
   const sessions = useMemo(() => deriveSessions(subjects), [subjects]);
-
   const totalSessions = sessions.length;
+
+  const handleConnect = useCallback(async () => {
+    setSyncState('connecting');
+    setErrorMsg('');
+    try {
+      setSyncState('syncing');
+      const result = await syncCalendar(sessions);
+      setSyncedCount(result.synced);
+      setSyncState('connected');
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to sync with Google Calendar.');
+      setSyncState('error');
+    }
+  }, [sessions]);
+
+  const handleDisconnect = useCallback(async () => {
+    setSyncState('disconnecting');
+    setErrorMsg('');
+    try {
+      await disconnectCalendar();
+      setSyncState('idle');
+      setSyncedCount(0);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to disconnect Google Calendar.');
+      setSyncState('connected');
+    }
+  }, []);
+
+  const isBusy = syncState === 'connecting' || syncState === 'syncing' || syncState === 'disconnecting';
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 animate-fade-in">
@@ -91,42 +119,74 @@ export default function CalendarScreen({ subjects }: CalendarScreenProps) {
           </p>
         </div>
 
-        {/* Google Calendar connect button */}
-        <button
-          onClick={() => setGoogleConnected((v) => !v)}
-          className={`
-            flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium
-            transition-all duration-200 active:scale-[0.98] shrink-0
-            ${
-              googleConnected
-                ? 'bg-teal-50 text-teal-700 border border-teal-200 hover:bg-teal-100'
-                : 'bg-navy-800 text-white hover:bg-navy-700'
-            }
-          `}
-        >
-          {googleConnected ? (
-            <>
-              <Check className="w-4 h-4" />
-              Google Calendar connected
-            </>
-          ) : (
-            <>
-              <Link2 className="w-4 h-4" />
-              Connect Google Calendar
-            </>
+        {/* Google Calendar connect/sync button */}
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          <button
+            onClick={syncState === 'connected' ? handleDisconnect : handleConnect}
+            disabled={isBusy || totalSessions === 0}
+            className={`
+              flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium
+              transition-all duration-200 active:scale-[0.98]
+              ${isBusy || totalSessions === 0 ? 'opacity-60 cursor-not-allowed' : ''}
+              ${
+                syncState === 'connected'
+                  ? 'bg-teal-50 text-teal-700 border border-teal-200 hover:bg-teal-100'
+                  : 'bg-navy-800 text-white hover:bg-navy-700'
+              }
+            `}
+          >
+            {isBusy ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                {syncState === 'connecting' && 'Connecting…'}
+                {syncState === 'syncing' && 'Syncing…'}
+                {syncState === 'disconnecting' && 'Disconnecting…'}
+              </>
+            ) : syncState === 'connected' ? (
+              <>
+                <Check className="w-4 h-4" />
+                Google Calendar connected
+              </>
+            ) : (
+              <>
+                <Link2 className="w-4 h-4" />
+                Connect Google Calendar
+              </>
+            )}
+          </button>
+          {totalSessions === 0 && (
+            <p className="text-navy-300 text-xs">Add a subject first</p>
           )}
-        </button>
+        </div>
       </div>
 
-      {googleConnected && (
+      {/* Error message */}
+      {syncState === 'error' && errorMsg && (
+        <div className="flex items-center gap-2 bg-coral-50 border border-coral-200 rounded-xl px-4 py-3 mb-4 animate-fade-in">
+          <AlertCircle className="w-4 h-4 text-coral-500 shrink-0" />
+          <p className="text-coral-700 text-sm flex-1">{errorMsg}</p>
+          <button
+            onClick={() => setSyncState('idle')}
+            className="text-coral-400 hover:text-coral-600 transition-colors"
+          >
+            <Unlink className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Connected status bar */}
+      {syncState === 'connected' && (
         <div className="flex items-center justify-between bg-teal-50 border border-teal-200 rounded-xl px-4 py-2.5 mb-4 animate-fade-in">
           <p className="text-teal-700 text-sm flex items-center gap-2">
             <Check className="w-4 h-4" />
-            Your study sessions are syncing to Google Calendar.
+            {syncedCount > 0
+              ? `${syncedCount} session${syncedCount !== 1 ? 's' : ''} synced to your Google Calendar.`
+              : 'Your Google Calendar is connected.'}
           </p>
           <button
-            onClick={() => setGoogleConnected(false)}
-            className="text-teal-600 hover:text-teal-800 text-xs flex items-center gap-1 transition-colors"
+            onClick={handleDisconnect}
+            disabled={isBusy}
+            className="text-teal-600 hover:text-teal-800 text-xs flex items-center gap-1 transition-colors disabled:opacity-50"
           >
             <Unlink className="w-3.5 h-3.5" />
             Disconnect
