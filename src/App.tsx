@@ -7,7 +7,7 @@ import UploadScreen from '@/components/UploadScreen';
 import CalendarScreen from '@/components/CalendarScreen';
 import QuizModal from '@/components/QuizModal';
 import ChatPanel from '@/components/ChatPanel';
-import type { Screen, RoadmapTopic, Subject } from '@/types';
+import type { Screen, RoadmapTopic, QuizAttempt, Subject } from '@/types';
 import { mockSubjects } from '@/data/mockData';
 
 function App() {
@@ -16,9 +16,16 @@ function App() {
   const [subjects, setSubjects] = useState<Subject[]>(mockSubjects);
   const [activeSubjectId, setActiveSubjectId] = useState<string | null>(null);
   const [quizRefreshKey, setQuizRefreshKey] = useState(0);
+  const [resumeAttempt, setResumeAttempt] = useState<QuizAttempt | null>(null);
 
   const handleQuizRequest = (topic: RoadmapTopic) => {
+    setResumeAttempt(null);
     setQuizTopic(topic);
+  };
+
+  const handleResumeQuiz = (attempt: QuizAttempt) => {
+    setQuizTopic(null);
+    setResumeAttempt(attempt);
   };
 
   const handleOpenSubject = (subjectId: string) => {
@@ -111,6 +118,7 @@ function App() {
                 onNewSubject={handleNewSubject}
                 onDeleteSubject={handleDeleteSubject}
                 quizRefreshKey={quizRefreshKey}
+                onResume={handleResumeQuiz}
               />
             )}
             {screen === 'subject-roadmap' && activeSubject && (
@@ -141,7 +149,11 @@ function App() {
       {/* Quiz modal — triggered from roadmap or chat */}
       <QuizModal
         topic={quizTopic}
-        onClose={() => setQuizTopic(null)}
+        resumeAttempt={resumeAttempt}
+        onClose={() => {
+          setQuizTopic(null);
+          setResumeAttempt(null);
+        }}
         onQuizComplete={() => setQuizRefreshKey((k) => k + 1)}
       />
     </div>

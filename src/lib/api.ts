@@ -106,6 +106,25 @@ export async function deleteQuizAttempt(id: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function updateQuizAttempt(id: string, updates: {
+  answers: (number | null)[];
+  score: number;
+  answered_count: number;
+  completed: boolean;
+}): Promise<void> {
+  const { error } = await supabase
+    .from('quiz_attempts')
+    .update({
+      answers: updates.answers,
+      score: updates.score,
+      answered_count: updates.answered_count,
+      completed: updates.completed,
+    })
+    .eq('id', id);
+
+  if (error) throw error;
+}
+
 // ── Streaming chat: calls the edge function and yields text chunks ────
 // Uses fetch + ReadableStream to parse SSE from the edge function.
 // The browser never touches the AI API key — it only talks to our backend.

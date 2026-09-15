@@ -8,12 +8,14 @@ import {
   AlertCircle,
   Loader2,
   ChevronRight,
+  RotateCcw,
 } from 'lucide-react';
 import type { QuizAttempt } from '@/types';
 import { fetchQuizAttempts, deleteQuizAttempt } from '@/lib/api';
 
 interface CompletedQuizzesProps {
   refreshKey: number;
+  onResume: (attempt: QuizAttempt) => void;
 }
 
 function formatDate(iso: string): string {
@@ -26,7 +28,7 @@ function formatDate(iso: string): string {
   });
 }
 
-export default function CompletedQuizzes({ refreshKey }: CompletedQuizzesProps) {
+export default function CompletedQuizzes({ refreshKey, onResume }: CompletedQuizzesProps) {
   const [attempts, setAttempts] = useState<QuizAttempt[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setErrorMsg] = useState('');
@@ -186,6 +188,20 @@ export default function CompletedQuizzes({ refreshKey }: CompletedQuizzesProps) 
                   <Clock className="w-3.5 h-3.5" />
                   <span>{formatDate(attempt.created_at)}</span>
                 </div>
+
+                {/* Continue button for incomplete quizzes */}
+                {!attempt.completed && (
+                  <button
+                    onClick={() => onResume(attempt)}
+                    className="w-full rounded-xl px-4 py-2.5 text-sm font-medium
+                      bg-navy-700 text-white hover:bg-navy-800
+                      transition-all duration-200 active:scale-[0.98] mb-3
+                      flex items-center justify-center gap-2"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    Continue quiz
+                  </button>
+                )}
 
                 {/* Expand/collapse questions */}
                 <button

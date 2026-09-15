@@ -1,17 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { X, Check, ChevronRight, RotateCcw, Trophy, Loader2, AlertCircle } from 'lucide-react';
-import type { QuizQuestion, RoadmapTopic } from '@/types';
-import { generateQuiz, saveQuizAttempt } from '@/lib/api';
+import type { QuizQuestion, QuizAttempt, RoadmapTopic } from '@/types';
+import { generateQuiz, saveQuizAttempt, updateQuizAttempt } from '@/lib/api';
 
 interface QuizModalProps {
   topic: RoadmapTopic | null;
+  resumeAttempt: QuizAttempt | null;
   onClose: () => void;
   onQuizComplete?: () => void;
 }
 
 type Phase = 'loading' | 'ready' | 'error';
 
-export default function QuizModal({ topic, onClose, onQuizComplete }: QuizModalProps) {
+export default function QuizModal({ topic, resumeAttempt, onClose, onQuizComplete }: QuizModalProps) {
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [phase, setPhase] = useState<Phase>('loading');
   const [errorMsg, setErrorMsg] = useState('');
@@ -26,8 +27,9 @@ export default function QuizModal({ topic, onClose, onQuizComplete }: QuizModalP
   const scoreRef = useRef(0);
   const answeredCountRef = useRef(0);
   const savedRef = useRef(false);
+  const attemptIdRef = useRef<string | null>(null);
 
-  const fetchQuestions = useCallback(async () => {
+  const startNewQuiz = useCallback(async () => {
     if (!topic) return;
     setPhase('loading');
     setErrorMsg('');
@@ -37,6 +39,7 @@ export default function QuizModal({ topic, onClose, onQuizComplete }: QuizModalP
     setScore(0);
     setFinished(false);
     savedRef.current = false;
+    attemptIdRef.current = null;
 
     try {
       const result = await generateQuiz({
@@ -56,28 +59,73 @@ export default function QuizModal({ topic, onClose, onQuizComplete }: QuizModalP
     }
   }, [topic]);
 
-  useEffect(() => {
-    if (topic) {
-      fetchQuestions();
-    }
-  }, [topic, fetchQuestions]);
+  const startResume = useCallback(async () => {
+    if (!resumeAttempt) return;
+    setPhase('loading');
+    setErrorMsg('');
 
-  const saveAttempt = useCallback(
+    const withIds = resumeAttempt.questions.map((q, i) => ({ ...q, id: `q-${i}` }));
+    setQuestions(withIds);
+    answersRef.current = [...resumeAttempt.answers];
+    scoreRef.current = resumeAttempt.score;
+    answeredCountRef.current = resumeAttempt.answered_count;
+    attemptIdRef.current = resumeAttempt.id;
+    savedRef.current = false;
+
+    setScore(resumeAttempt.score);
+
+    // Find first unanswered question
+    let firstUnanswered = 0;
+    for (let i = 0; i < resumeAttempt.answers.length; i++) {
+      if (resumeAttempt.answers[i] === null || resumeAttempt.answers[i] === undefined) {
+        firstUnanswered = i;
+        break;
+      }
+      firstUnanswered = i + 1;
+    }
+    const startIndex = Math.min(firstUnanswered, withIds.length - 1);
+    setCurrentIndex(startIndex);
+    setSelectedAnswer(null);
+    setSubmitted(false);
+    setFinished(false);
+    setPhase('ready');
+  }, [resumeAttempt]);
+
+  useEffect(() => {
+    if (resumeAttempt) {
+      startResume();
+    } else if (topic) {
+      startNewQuiz();
+    }
+  }, [topic, resumeAttempt, startNewQuiz, startResume]);
+
+  const persistAttempt = useCallback(
     async (completed: boolean) => {
-      if (!topic || savedRef.current || questions.length === 0) return;
+      if (questions.length === 0) return;
+      if (savedRef.current) return;
       savedRef.current = true;
       setSaving(true);
       try {
-        await saveQuizAttempt({
-          topic_title: topic.title,
-          subject_name: topic.subject,
-          questions,
-          answers: answersRef.current,
-          score: scoreRef.current,
-          answered_count: answeredCountRef.current,
-          total_questions: questions.length,
-          completed,
-        });
+        if (attemptIdRef.current) {
+          await updateQuizAttempt(attemptIdRef.current, {
+            answers: answersRef.current,
+            score: scoreRef.current,
+            answered_count: answeredCountRef.current,
+            completed,
+          });
+        } else if (topic) {
+          const saved = await saveQuizAttempt({
+            topic_title: topic.title,
+            subject_name: topic.subject,
+            questions,
+            answers: answersRef.current,
+            score: scoreRef.current,
+            answered_count: answeredCountRef.current,
+            total_questions: questions.length,
+            completed,
+          });
+          if (saved) attemptIdRef.current = saved.id;
+        }
         onQuizComplete?.();
       } catch {
         savedRef.current = false;
@@ -88,16 +136,16 @@ export default function QuizModal({ topic, onClose, onQuizComplete }: QuizModalP
     [topic, questions, onQuizComplete],
   );
 
-  // Save incomplete attempt when user closes mid-quiz
   const handleClose = useCallback(() => {
     if (phase === 'ready' && !finished && answeredCountRef.current > 0) {
-      saveAttempt(false);
+      persistAttempt(false);
     }
     onClose();
-  }, [phase, finished, saveAttempt, onClose]);
+  }, [phase, finished, persistAttempt, onClose]);
 
-  if (!topic) return null;
+  if (!topic && !resumeAttempt) return null;
 
+  const displayTitle = resumeAttempt?.topic_title ?? topic?.title ?? '';
   const question = questions[currentIndex];
   const isLast = currentIndex === questions.length - 1;
 
@@ -115,7 +163,7 @@ export default function QuizModal({ topic, onClose, onQuizComplete }: QuizModalP
   const handleNext = () => {
     if (isLast) {
       setFinished(true);
-      saveAttempt(true);
+      persistAttempt(true);
       return;
     }
     setCurrentIndex((i) => i + 1);
@@ -124,7 +172,7 @@ export default function QuizModal({ topic, onClose, onQuizComplete }: QuizModalP
   };
 
   const handleRestart = () => {
-    fetchQuestions();
+    startNewQuiz();
   };
 
   return (
@@ -139,8 +187,10 @@ export default function QuizModal({ topic, onClose, onQuizComplete }: QuizModalP
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <p className="text-navy-400 text-xs uppercase tracking-wider mb-1">Quiz</p>
-            <h2 className="font-serif text-xl text-navy-800">{topic.title}</h2>
+            <p className="text-navy-400 text-xs uppercase tracking-wider mb-1">
+              {resumeAttempt ? 'Continue quiz' : 'Quiz'}
+            </p>
+            <h2 className="font-serif text-xl text-navy-800">{displayTitle}</h2>
           </div>
           <button
             onClick={handleClose}
@@ -153,8 +203,10 @@ export default function QuizModal({ topic, onClose, onQuizComplete }: QuizModalP
         {phase === 'loading' && (
           <div className="flex flex-col items-center justify-center py-16 animate-fade-in">
             <Loader2 className="w-8 h-8 text-navy-400 animate-spin mb-4" />
-            <p className="text-navy-500 text-sm">Generating quiz questions about {topic.title}…</p>
-            <p className="text-navy-300 text-xs mt-1">This usually takes a few seconds</p>
+            <p className="text-navy-500 text-sm">
+              {resumeAttempt ? 'Loading your saved quiz…' : `Generating quiz questions about ${displayTitle}…`}
+            </p>
+            {!resumeAttempt && <p className="text-navy-300 text-xs mt-1">This usually takes a few seconds</p>}
           </div>
         )}
 
@@ -166,7 +218,7 @@ export default function QuizModal({ topic, onClose, onQuizComplete }: QuizModalP
             <h3 className="font-serif text-lg text-navy-800 mb-2">Couldn't load quiz</h3>
             <p className="text-navy-500 text-sm text-center mb-6 max-w-xs">{errorMsg}</p>
             <div className="flex gap-3">
-              <button onClick={fetchQuestions} className="btn-primary flex items-center gap-2">
+              <button onClick={startNewQuiz} className="btn-primary flex items-center gap-2">
                 <RotateCcw className="w-4 h-4" />
                 Try again
               </button>
@@ -178,7 +230,6 @@ export default function QuizModal({ topic, onClose, onQuizComplete }: QuizModalP
         )}
 
         {phase === 'ready' && finished && (
-          /* Results screen */
           <div className="text-center py-8 animate-scale-in">
             <div className="w-20 h-20 rounded-full bg-teal-50 flex items-center justify-center mx-auto mb-5">
               <Trophy className="w-10 h-10 text-teal-500" />

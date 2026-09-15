@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { BookOpen, Plus, ChevronRight, CalendarClock, Layers, Trash2, X } from 'lucide-react';
-import type { Subject } from '@/types';
+import type { Subject, QuizAttempt } from '@/types';
 import CompletedQuizzes from '@/components/CompletedQuizzes';
 
 interface RoadmapOverviewProps {
@@ -9,6 +9,7 @@ interface RoadmapOverviewProps {
   onNewSubject: () => void;
   onDeleteSubject: (subjectId: string) => void;
   quizRefreshKey: number;
+  onResume: (attempt: QuizAttempt) => void;
 }
 
 const colorBars: Record<Subject['color'], string> = {
@@ -31,6 +32,7 @@ export default function RoadmapOverview({
   onNewSubject,
   onDeleteSubject,
   quizRefreshKey,
+  onResume,
 }: RoadmapOverviewProps) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
@@ -155,7 +157,7 @@ export default function RoadmapOverview({
       </div>
 
       {/* Completed quizzes section */}
-      <CompletedQuizzes refreshKey={quizRefreshKey} />
+      <CompletedQuizzes refreshKey={quizRefreshKey} onResume={onResume} />
 
       {/* Delete confirmation modal */}
       {subjectToDelete && (

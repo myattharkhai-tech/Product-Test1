@@ -53,6 +53,16 @@ export interface QuizAttempt {
   created_at: string;
 }
 
+export interface ResumeQuizData {
+  attemptId: string;
+  questions: QuizQuestion[];
+  answers: (number | null)[];
+  score: number;
+  answeredCount: number;
+  totalQuestions: number;
+  currentIndex: number;
+}
+
 export interface StudySession {
   id: string;
   day: number; // 0 = Monday, 6 = Sunday

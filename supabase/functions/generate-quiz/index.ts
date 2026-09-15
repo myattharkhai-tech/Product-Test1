@@ -21,6 +21,17 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function shuffleOptions(q: QuizQuestion): QuizQuestion {
+  const indices = [0, 1, 2, 3];
+  for (let i = indices.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [indices[i], indices[j]] = [indices[j], indices[i]];
+  }
+  const shuffledOptions = indices.map((i) => q.options[i]);
+  const newCorrectIndex = indices.indexOf(q.correctIndex);
+  return { ...q, options: shuffledOptions, correctIndex: newCorrectIndex };
+}
+
 async function generateQuizQuestions(
   topicTitle: string,
   subjectName: string,
@@ -97,7 +108,7 @@ Rules:
       }
     }
 
-    return questions;
+    return questions.map(shuffleOptions);
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       throw new Error("The quiz generation timed out — please try again.");
