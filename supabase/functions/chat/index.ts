@@ -7,6 +7,7 @@ import {
   sanitizeForLog,
   type ChatTurn,
 } from "../_shared/ai-chat-config.ts";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -19,6 +20,60 @@ function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+const FREE_DAILY_CHAT_LIMIT = 20;
+
+async function checkChatLimit(plan: string): Promise<{ allowed: boolean; remaining: number }> {
+  if (plan === "pro") return { allowed: true, remaining: -1 };
+
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL") ?? "",
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+  { auth: { persistSession: false } },
+  );
+
+  const today = new Date().toISOString().slice(0, 10);
+  const { data } = await supabase
+    .from("daily_chat_usage")
+    .select("message_count")
+    .eq("date", today)
+    .maybeSingle();
+
+  const currentCount = data?.message_count ?? 0;
+  if (currentCount >= FREE_DAILY_CHAT_LIMIT) {
+    return { allowed: false, remaining: 0 };
+  }
+  return { allowed: true, remaining: FREE_DAILY_CHAT_LIMIT - currentCount };
+}
+
+async function incrementChatCount(): Promise<void> {
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL") ?? "",
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    { auth: { persistSession: false } },
+  );
+
+  const today = new Date().toISOString().slice(0, 10);
+  const { data } = await supabase
+    .from("daily_chat_usage")
+    .select("message_count")
+    .eq("date", today)
+    .maybeSingle();
+
+  const currentCount = data?.message_count ?? 0;
+  const newCount = currentCount + 1;
+
+  if (data) {
+    await supabase
+      .from("daily_chat_usage")
+      .update({ message_count: newCount, updated_at: new Date().toISOString() })
+      .eq("date", today);
+  } else {
+    await supabase
+      .from("daily_chat_usage")
+      .insert({ date: today, message_count: newCount });
+  }
 }
 
 Deno.serve(async (req) => {
@@ -50,15 +105,25 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { message, history, subjects, attachments } = body as {
+    const { message, history, subjects, attachments, plan } = body as {
       message?: string;
       history?: ChatTurn[];
       subjects?: string[];
       attachments?: string[];
+      plan?: string;
     };
 
     if (!message && (!attachments || attachments.length === 0)) {
       return jsonResponse({ error: "No message provided" }, 400);
+    }
+
+    // Enforce free-plan daily chat limit
+    const limitCheck = await checkChatLimit(plan ?? "free");
+    if (!limitCheck.allowed) {
+      return jsonResponse({
+        error: "You've reached your daily limit of 20 AI chat messages on the Free plan. Upgrade to Pro for unlimited messages.",
+        limit_reached: true,
+      }, 403);
     }
 
     // Server-side input length validation
@@ -94,6 +159,10 @@ Deno.serve(async (req) => {
         };
 
         try {
+          // Increment daily chat count for free users
+          if ((plan ?? "free") !== "pro") {
+            await incrementChatCount();
+          }
           for await (const chunk of streamChatMessage(config, history ?? [], userMessage, extraContext)) {
             send({ type: "chunk", text: chunk });
           }

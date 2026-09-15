@@ -1,5 +1,12 @@
 export type Screen = 'roadmap' | 'subject-roadmap' | 'upload' | 'calendar';
 
+export type Plan = 'free' | 'pro';
+
+export interface PlanInfo {
+  plan: Plan;
+  weeklyEmailEnabled: boolean;
+}
+
 export interface UploadedItem {
   id: string;
   name: string;

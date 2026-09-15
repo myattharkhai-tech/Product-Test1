@@ -36,11 +36,19 @@ async function generateQuizQuestions(
   topicTitle: string,
   subjectName: string,
   count: number,
+  difficulty: "normal" | "adaptive",
+  wrongTopics: string[],
 ): Promise<QuizQuestion[]> {
   const config = loadAIConfig();
 
+  const difficultyInstruction = difficulty === "adaptive" && wrongTopics.length > 0
+    ? `The student has previously struggled with these related topics: ${wrongTopics.join(", ")}. Generate harder questions that test deeper understanding, edge cases, and common misconceptions about these areas. Make the distractors more plausible and challenging.`
+    : "Vary difficulty across questions.";
+
   const prompt = `You are StudyFlow AI, a quiz generator for university students.
 Generate ${count} multiple-choice quiz questions about "${topicTitle}" in the context of the subject "${subjectName}".
+
+${difficultyInstruction}
 
 Return ONLY a JSON array (no markdown, no code fences) with this exact structure:
 [
@@ -57,7 +65,6 @@ Rules:
 - correctIndex is 0-based (0 = first option, 3 = last option).
 - Questions should test understanding, not just memorization.
 - Explanations should be concise (1-2 sentences).
-- Vary difficulty across questions.
 - Make sure the correct answer is not always the same position.`;
 
   const controller = new AbortController();
@@ -141,24 +148,29 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { topic, subject, count } = body as {
+    const { topic, subject, count, plan, wrong_topics } = body as {
       topic?: string;
       subject?: string;
       count?: number;
+      plan?: string;
+      wrong_topics?: string[];
     };
 
     if (!topic || !topic.trim()) {
       return jsonResponse({ error: "A topic is required to generate quiz questions." }, 400);
     }
 
-    const questionCount = Math.min(Math.max(count ?? 5, 3), 10);
+    const isPro = plan === "pro";
+    const questionCount = isPro ? Math.min(Math.max(count ?? 10, 5), 10) : 5;
     const subjectName = subject?.trim() || "General";
+    const difficulty: "normal" | "adaptive" = isPro ? "adaptive" : "normal";
+    const wrongTopics = Array.isArray(wrong_topics) ? wrong_topics.slice(0, 10) : [];
 
     console.log(
-      `quiz request: ip=${sanitizeForLog(clientIP)} topic="${sanitizeForLog(topic)}" subject="${sanitizeForLog(subjectName)}" count=${questionCount}`,
+      `quiz request: ip=${sanitizeForLog(clientIP)} topic="${sanitizeForLog(topic)}" subject="${sanitizeForLog(subjectName)}" count=${questionCount} plan=${isPro ? "pro" : "free"} difficulty=${difficulty}`,
     );
 
-    const questions = await generateQuizQuestions(topic.trim(), subjectName, questionCount);
+    const questions = await generateQuizQuestions(topic.trim(), subjectName, questionCount, difficulty, wrongTopics);
 
     return jsonResponse({ questions });
   } catch (err) {

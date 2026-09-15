@@ -7,16 +7,28 @@ import UploadScreen from '@/components/UploadScreen';
 import CalendarScreen from '@/components/CalendarScreen';
 import QuizModal from '@/components/QuizModal';
 import ChatPanel from '@/components/ChatPanel';
+import UpgradeModal from '@/components/UpgradeModal';
+import { PlanProvider, usePlan } from '@/lib/usePlan';
 import type { Screen, RoadmapTopic, QuizAttempt, Subject } from '@/types';
 import { mockSubjects } from '@/data/mockData';
 
-function App() {
+const FREE_SUBJECT_LIMIT = 2;
+
+function AppContent() {
+  const { plan } = usePlan();
   const [screen, setScreen] = useState<Screen>('roadmap');
   const [quizTopic, setQuizTopic] = useState<RoadmapTopic | null>(null);
   const [subjects, setSubjects] = useState<Subject[]>(mockSubjects);
   const [activeSubjectId, setActiveSubjectId] = useState<string | null>(null);
   const [quizRefreshKey, setQuizRefreshKey] = useState(0);
   const [resumeAttempt, setResumeAttempt] = useState<QuizAttempt | null>(null);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [upgradeReason, setUpgradeReason] = useState<string | undefined>(undefined);
+
+  const showUpgrade = (reason?: string) => {
+    setUpgradeReason(reason);
+    setUpgradeOpen(true);
+  };
 
   const handleQuizRequest = (topic: RoadmapTopic) => {
     setResumeAttempt(null);
@@ -39,6 +51,12 @@ function App() {
   };
 
   const handleNewSubject = () => {
+    if (plan === 'free' && subjects.length >= FREE_SUBJECT_LIMIT) {
+      showUpgrade(
+        `You've reached the Free plan limit of ${FREE_SUBJECT_LIMIT} active subjects. Upgrade to Pro for unlimited subjects.`,
+      );
+      return;
+    }
     setScreen('upload');
   };
 
@@ -56,12 +74,10 @@ function App() {
     existingSubjectId: string | null
   ) => {
     if (isExisting && existingSubjectId && subject) {
-      // For existing subjects, merge new topics into the existing roadmap
       {
         setSubjects((prev) =>
           prev.map((s) => {
             if (s.id !== existingSubjectId) return s;
-            // Append new days after existing ones
             const existingDayCount = s.roadmap.length;
             const newDays = subject.roadmap.map((day, i) => ({
               ...day,
@@ -81,15 +97,12 @@ function App() {
         setScreen('subject-roadmap');
       }
     } else if (subject) {
-      // New subject — add to the list
       setSubjects((prev) => [...prev, subject]);
       setScreen('roadmap');
     }
   };
 
-  const handleFileProcessed = () => {
-    // Chat-uploaded files are handled by the ChatPanel itself now via the edge function
-  };
+  const handleFileProcessed = () => {};
 
   const activeSubject = subjects.find((s) => s.id === activeSubjectId) ?? null;
 
@@ -98,7 +111,6 @@ function App() {
       <Sidebar current={screen} onNavigate={setScreen} />
 
       <div className="flex-1 flex flex-col min-w-0 pb-16 sm:pb-0">
-        {/* Mobile header */}
         <header className="sm:hidden flex items-center gap-2.5 px-5 py-4 bg-navy-800 text-white sticky top-0 z-20">
           <div className="w-8 h-8 rounded-lg bg-ice-300 flex items-center justify-center">
             <Sparkles className="w-4 h-4 text-navy-800" />
@@ -137,16 +149,17 @@ function App() {
             {screen === 'calendar' && <CalendarScreen subjects={subjects} />}
           </div>
 
-          {/* Desktop chat panel — docked as a right column */}
           <ChatPanel
             onQuizRequest={handleQuizRequest}
             subjects={subjects}
             onFileProcessed={handleFileProcessed}
+            onUpgradeNeeded={() => showUpgrade(
+              "You've reached your daily limit of 20 AI chat messages on the Free plan. Upgrade to Pro for unlimited messages.",
+            )}
           />
         </main>
       </div>
 
-      {/* Quiz modal — triggered from roadmap or chat */}
       <QuizModal
         topic={quizTopic}
         resumeAttempt={resumeAttempt}
@@ -156,8 +169,20 @@ function App() {
         }}
         onQuizComplete={() => setQuizRefreshKey((k) => k + 1)}
       />
+
+      <UpgradeModal
+        open={upgradeOpen}
+        reason={upgradeReason}
+        onClose={() => setUpgradeOpen(false)}
+      />
     </div>
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <PlanProvider>
+      <AppContent />
+    </PlanProvider>
+  );
+}

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { X, Check, ChevronRight, RotateCcw, Trophy, Loader2, AlertCircle } from 'lucide-react';
 import type { QuizQuestion, QuizAttempt, RoadmapTopic } from '@/types';
 import { generateQuiz, saveQuizAttempt, updateQuizAttempt } from '@/lib/api';
+import { usePlan } from '@/lib/usePlan';
 
 interface QuizModalProps {
   topic: RoadmapTopic | null;
@@ -13,6 +14,7 @@ interface QuizModalProps {
 type Phase = 'loading' | 'ready' | 'error';
 
 export default function QuizModal({ topic, resumeAttempt, onClose, onQuizComplete }: QuizModalProps) {
+  const { plan } = usePlan();
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [phase, setPhase] = useState<Phase>('loading');
   const [errorMsg, setErrorMsg] = useState('');
@@ -45,7 +47,8 @@ export default function QuizModal({ topic, resumeAttempt, onClose, onQuizComplet
       const result = await generateQuiz({
         topic: topic.title,
         subject: topic.subject,
-        count: 5,
+        count: plan === 'pro' ? 10 : 5,
+        plan,
       });
       const withIds = result.map((q, i) => ({ ...q, id: `q-${i}` }));
       setQuestions(withIds);

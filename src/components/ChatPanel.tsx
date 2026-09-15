@@ -12,12 +12,14 @@ import {
 } from 'lucide-react';
 import type { ChatMessage, ChatAttachment, RoadmapTopic, Subject } from '@/types';
 import { mockChatMessages, formatFileSize, getFileType } from '@/data/mockData';
-import { generateRoadmap, streamChatMessage } from '@/lib/api';
+import { generateRoadmap, streamChatMessage, ChatLimitError } from '@/lib/api';
+import { usePlan } from '@/lib/usePlan';
 
 interface ChatPanelProps {
   onQuizRequest: (topic: RoadmapTopic) => void;
   subjects: Subject[];
   onFileProcessed: (filename: string, subjectName: string, isExisting: boolean, subjectId: string | null) => void;
+  onUpgradeNeeded: () => void;
 }
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
@@ -35,7 +37,8 @@ function getAttachIcon(fileType: ChatAttachment['fileType']) {
   }
 }
 
-export default function ChatPanel({ onQuizRequest, subjects, onFileProcessed }: ChatPanelProps) {
+export default function ChatPanel({ onQuizRequest, subjects, onFileProcessed, onUpgradeNeeded }: ChatPanelProps) {
+  const { plan } = usePlan();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>(mockChatMessages);
   const [input, setInput] = useState('');
@@ -152,6 +155,7 @@ export default function ChatPanel({ onQuizRequest, subjects, onFileProcessed }: 
           history: chatHistory,
           subjects,
           attachments: attachmentNames,
+          plan,
         })) {
           if (!receivedAny) {
             receivedAny = true;
@@ -197,7 +201,15 @@ export default function ChatPanel({ onQuizRequest, subjects, onFileProcessed }: 
         }
       } catch (error) {
         setIsTyping(false);
-        if (!receivedAny) {
+        if (error instanceof ChatLimitError) {
+          onUpgradeNeeded();
+          setMessages((prev) => [...prev, {
+            id: assistantId,
+            role: 'assistant' as const,
+            content: 'You have reached your daily chat limit on the Free plan. Upgrade to Pro for unlimited messages.',
+            timestamp: new Date().toISOString(),
+          }]);
+        } else if (!receivedAny) {
           setMessages((prev) => [...prev, {
             id: assistantId,
             role: 'assistant' as const,

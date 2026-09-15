@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { QuizAttempt, QuizQuestion, RoadmapDay, StudySession, Subject } from '@/types';
+import type { PlanInfo, QuizAttempt, QuizQuestion, RoadmapDay, StudySession, Subject } from '@/types';
 
 export interface GenerateRoadmapResult {
   subject_name: string;
@@ -36,12 +36,16 @@ export async function generateQuiz(params: {
   topic: string;
   subject?: string;
   count?: number;
+  plan?: 'free' | 'pro';
+  wrongTopics?: string[];
 }): Promise<QuizQuestion[]> {
   const { data, error } = await supabase.functions.invoke('generate-quiz', {
     body: {
       topic: params.topic,
       subject: params.subject ?? '',
       count: params.count ?? 5,
+      plan: params.plan ?? 'free',
+      wrong_topics: params.wrongTopics ?? [],
     },
   });
 
@@ -125,6 +129,82 @@ export async function updateQuizAttempt(id: string, updates: {
   if (error) throw error;
 }
 
+// ── Subscription plan management ─────────────────────────────────────
+
+export async function fetchPlan(): Promise<PlanInfo> {
+  const { data, error } = await supabase
+    .from('user_plans')
+    .select('plan, weekly_email_enabled')
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return { plan: 'free', weeklyEmailEnabled: false };
+  return {
+    plan: data.plan as 'free' | 'pro',
+    weeklyEmailEnabled: data.weekly_email_enabled as boolean,
+  };
+}
+
+export async function updatePlan(plan: 'free' | 'pro'): Promise<void> {
+  const { error } = await supabase
+    .from('user_plans')
+    .update({ plan, updated_at: new Date().toISOString() })
+    .neq('id', '00000000-0000-0000-0000-000000000000');
+
+  if (error) throw error;
+}
+
+export async function updateWeeklyEmail(enabled: boolean): Promise<void> {
+  const { error } = await supabase
+    .from('user_plans')
+    .update({ weekly_email_enabled: enabled, updated_at: new Date().toISOString() })
+    .neq('id', '00000000-0000-0000-0000-000000000000');
+
+  if (error) throw error;
+}
+
+export async function fetchDailyChatCount(): Promise<number> {
+  const today = new Date().toISOString().slice(0, 10);
+  const { data, error } = await supabase
+    .from('daily_chat_usage')
+    .select('message_count')
+    .eq('date', today)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data?.message_count ?? 0;
+}
+
+export async function incrementDailyChatCount(): Promise<number> {
+  const today = new Date().toISOString().slice(0, 10);
+  const { data, error } = await supabase
+    .from('daily_chat_usage')
+    .select('message_count')
+    .eq('date', today)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  const currentCount = data?.message_count ?? 0;
+  const newCount = currentCount + 1;
+
+  if (data) {
+    const { error: updateError } = await supabase
+      .from('daily_chat_usage')
+      .update({ message_count: newCount, updated_at: new Date().toISOString() })
+      .eq('date', today);
+    if (updateError) throw updateError;
+  } else {
+    const { error: insertError } = await supabase
+      .from('daily_chat_usage')
+      .insert({ date: today, message_count: newCount });
+    if (insertError) throw insertError;
+  }
+
+  return newCount;
+}
+
 // ── Google Calendar sync ──────────────────────────────────────────────
 
 export async function syncCalendar(sessions: StudySession[]): Promise<{ synced: number }> {
@@ -166,6 +246,14 @@ export interface StreamChatParams {
   history: { role: 'user' | 'assistant'; content: string }[];
   subjects: Subject[];
   attachments?: string[];
+  plan?: 'free' | 'pro';
+}
+
+export class ChatLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ChatLimitError';
+  }
 }
 
 export async function* streamChatMessage(
@@ -185,11 +273,15 @@ export async function* streamChatMessage(
       history: params.history,
       subjects: params.subjects.map((s) => s.name),
       attachments: params.attachments ?? [],
+      plan: params.plan ?? 'free',
     }),
   });
 
   if (!res.ok) {
     const details = await res.json().catch(() => null);
+    if (res.status === 403 && details?.limit_reached) {
+      throw new ChatLimitError(details.error);
+    }
     throw new Error(details?.error || `Unable to reach the assistant (HTTP ${res.status}). Check the chat backend configuration.`);
   }
 

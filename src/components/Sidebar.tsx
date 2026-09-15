@@ -1,5 +1,6 @@
-import { Map, Upload, Calendar, Sparkles } from 'lucide-react';
+import { Map, Upload, Calendar, Sparkles, Mail, Zap } from 'lucide-react';
 import type { Screen } from '@/types';
+import { usePlan } from '@/lib/usePlan';
 
 interface SidebarProps {
   current: Screen;
@@ -13,8 +14,8 @@ const navItems: { id: Screen; label: string; icon: typeof Map; description: stri
 ];
 
 export default function Sidebar({ current, onNavigate }: SidebarProps) {
-  // "subject-roadmap" should highlight the Roadmap nav item
   const activeScreen: Screen = current === 'subject-roadmap' ? 'roadmap' : current;
+  const { plan, weeklyEmailEnabled, toggleWeeklyEmail, upgrade } = usePlan();
 
   return (
     <>
@@ -62,13 +63,52 @@ export default function Sidebar({ current, onNavigate }: SidebarProps) {
           })}
         </nav>
 
-        <div className="px-6 py-5 border-t border-navy-700">
-          <div className="bg-navy-700/50 rounded-xl p-4">
-            <p className="text-ice-300 text-xs font-medium mb-1">Need help?</p>
-            <p className="text-navy-300 text-xs leading-relaxed">
-              Use the chat panel to ask questions, get explanations, or upload files.
-            </p>
-          </div>
+        <div className="px-3 py-3 border-t border-navy-700">
+          {plan === 'pro' ? (
+            <div className="bg-navy-700/50 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Zap className="w-4 h-4 text-ice-300" />
+                <p className="text-ice-300 text-xs font-medium">Pro plan active</p>
+              </div>
+              <button
+                onClick={() => toggleWeeklyEmail(!weeklyEmailEnabled)}
+                className="w-full flex items-center justify-between gap-2 text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-navy-300" />
+                  <span className="text-navy-300 text-xs">Weekly email</span>
+                </div>
+                <div
+                  className={`w-9 h-5 rounded-full transition-colors duration-200 relative shrink-0 ${
+                    weeklyEmailEnabled ? 'bg-teal-500' : 'bg-navy-600'
+                  }`}
+                >
+                  <div
+                    className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform duration-200 ${
+                      weeklyEmailEnabled ? 'translate-x-4' : 'translate-x-0.5'
+                    }`}
+                  />
+                </div>
+              </button>
+            </div>
+          ) : (
+            <div className="bg-navy-700/50 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <Sparkles className="w-4 h-4 text-ice-300" />
+                <p className="text-ice-300 text-xs font-medium">Free plan</p>
+              </div>
+              <p className="text-navy-300 text-xs leading-relaxed mb-3">
+                2 subjects, 20 chat messages/day, 5-question quizzes.
+              </p>
+              <button
+                onClick={() => upgrade()}
+                className="w-full rounded-lg bg-ice-300 text-navy-800 text-xs font-medium py-2
+                  hover:bg-ice-200 transition-colors"
+              >
+                Upgrade to Pro
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 
